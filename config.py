@@ -65,6 +65,8 @@ parser.add_argument('--batch', type=int, default=128, help='Mini-Batch Size')
 parser.add_argument('--batch_explore', type=int, default=64, help='Mini-Batch Size for Exploitation')
 parser.add_argument('--batch_exploit', type=int, default=64, help='Mini-Batch Size for Exploration')
 parser.add_argument('--max-frame', type=int, default=50000, help='Episode Frame Limit')
+parser.add_argument('--seq-length', type=int, default=80, help='Length of RNN sequence')
+parser.add_argument('--burn-in', type=int, default=40, help='Length of Burn-in RNN sequence')
 
 
 parser.add_argument('--history-length', type=int, default=4, metavar='T', help='Number of consecutive states processed')
