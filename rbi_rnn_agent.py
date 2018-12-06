@@ -151,7 +151,7 @@ class RBIRNNAgent(Agent):
             r = sample['r'].to(self.device)
             rho = sample['rho'].to(self.device)
             pi = sample['pi'].to(self.device)
-            aux = sample['aux'].to(self.device)
+            h_adv = sample['h_adv'].to(self.device)
 
             # Behavioral nets
             beta = self.beta_net(s, aux)
