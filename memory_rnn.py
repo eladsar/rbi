@@ -6,6 +6,7 @@ from config import consts, args
 from preprocess import get_mc_value, hinv_np, lock_file, release_file
 import itertools
 import cv2
+import pandas as pd
 
 
 img_width = args.width
@@ -20,8 +21,9 @@ class MemoryRNN(torch.utils.data.Dataset):
         super(MemoryRNN, self).__init__()
         self.history_length = args.history_length
         self.n_steps = args.n_steps
-        self.total_seq = args.seq_length + args.burn_in
-        self.history_mat = np.expand_dims(np.arange(self.total_seq), axis=1) + np.arange(self.history_length)
+        self.seq_length = args.seq_length
+        self.burn_in = args.burn_in
+        self.history_mat = np.expand_dims(np.arange(self.seq_length + self.burn_in), axis=1) + np.arange(self.history_length)
 
     def __len__(self):
         return args.n_tot
@@ -29,14 +31,16 @@ class MemoryRNN(torch.utils.data.Dataset):
     def __getitem__(self, index):
         raise NotImplementedError
 
-    def preprocess_trajectory(self, episode_dir, frame):
+    def preprocess_trajectory(self, episode_dir, frame, k):
 
-        frames = [os.path.join(episode_dir, "%d.png" % (frame + i))
-                  for i in range(-self.history_length + 1, self.total_seq + 1)]
-
+        frames = [os.path.join(episode_dir, "%d.png" % max(frame + i, -1))
+                  for i in range(-self.history_length + 1, k)]
+        # try:
         imgs = np.stack([(cv2.resize(cv2.imread(f0, imread_grayscale).astype(np.float32),
-                                     (img_width, img_height), interpolation=interpolation) / 256.) for f0 in frames], axis=0)
-        return imgs[self.history_mat, :, :]
+                                         (img_width, img_height), interpolation=interpolation) / 256.) for f0 in frames], axis=0)
+        # except:
+        #     print("XXX")
+        return imgs[self.history_mat[:k], :, :]
 
 
 class ObservationsRNNMemory(MemoryRNN):
@@ -48,18 +52,33 @@ class ObservationsRNNMemory(MemoryRNN):
 
     def __getitem__(self, samples):
 
-        episode_dir = os.path.join(self.screen_dir, str(samples[0]['ep']))
-        s = self.preprocess_trajectory(episode_dir, samples[0]['fr'])
+        l = min(samples[self.burn_in]['fr'] - samples[self.burn_in]['fr_s'], self.burn_in)
+        pad_l = self.burn_in - l
+        k = min(samples[self.burn_in]['fr_e'] - samples[self.burn_in]['fr'], self.seq_length) + l
+        samples = samples[self.burn_in-l:self.burn_in-l+k]
+        pad_r = self.seq_length + self.burn_in - (k + pad_l)
 
-        r = np.stack([samples[i]['r'] for i in samples], axis=0)
-        rho = np.stack([samples[i]['rho'] for i in samples], axis=0)
-        a = np.stack([samples[i]['a'] for i in samples], axis=0)
-        pi = np.stack([samples[i]['pi'] for i in samples], axis=0)
-        h_adv = np.stack([samples[i]['h_adv'] for i in samples], axis=0)
-        h_v = np.stack([samples[i]['h_v'] for i in samples], axis=0)
-        h_beta = np.stack([samples[i]['h_beta'] for i in samples], axis=0)
+        episode_dir = os.path.join(self.screen_dir, str(samples[self.burn_in]['ep']))
+        s = self.preprocess_trajectory(episode_dir, samples[self.burn_in]['fr'] - l, k)
 
-        return {'s': s, 'r': r, 'rho': rho, 'a': a, 'pi': pi, 'h_adv': h_adv, 'h_v': h_v, 'h_beta': h_beta}
+        r = np.stack([sample['r'] for sample in samples], axis=0)
+        rho = np.stack([sample['rho'] for sample in samples], axis=0)
+        a = np.stack([sample['a'] for sample in samples], axis=0)
+        pi = np.stack([sample['pi'] for sample in samples], axis=0)
+        h_adv = np.stack([sample['h_adv'] for sample in samples], axis=0)
+        h_v = np.stack([sample['h_v'] for sample in samples], axis=0)
+        h_beta = np.stack([sample['h_beta'] for sample in samples], axis=0)
+
+        r = np.pad(r, [(pad_l, pad_r)], 'constant', constant_values=0)
+        rho = np.pad(rho, [(pad_l, pad_r), (0, 0)], 'constant', constant_values=0)
+        a = np.pad(a, [(pad_l, pad_r)], 'constant', constant_values=0)
+        pi = np.pad(pi, [(pad_l, pad_r), (0, 0)], 'constant', constant_values=0)
+        h_adv = np.pad(h_adv, [(pad_l, pad_r), (0, 0)], 'constant', constant_values=0)
+        h_v = np.pad(h_v, [(pad_l, pad_r), (0, 0)], 'constant', constant_values=0)
+        h_beta = np.pad(h_beta, [(pad_l, pad_r), (0, 0)], 'constant', constant_values=0)
+        s = np.pad(s, [(pad_l, pad_r), (0, 0), (0, 0), (0, 0)], 'constant', constant_values=0)
+
+        return {'s': s, 'r': r, 'rho': rho, 'a': a, 'pi': pi, 'h_adv': h_adv[0], 'h_v': h_v[0], 'h_beta': h_beta[0]}
 
 
 class ObservationsRNNBatchSampler(object):
@@ -80,7 +99,7 @@ class ObservationsRNNBatchSampler(object):
 
         traj_old = 0
         replay_buffer = np.array([])
-        sequence = np.arange(args.burn_in + args.seq_length)
+        sequence = np.arange(-args.burn_in, args.seq_length)
 
         while True:
 
@@ -114,7 +133,11 @@ class ObservationsRNNBatchSampler(object):
             print("Explorer:Replay Buffer size is: %d" % len_replay_buffer)
 
             for i in range(minibatches):
-                yield replay_buffer[shuffle_indexes[i * self.batch:(i + 1) * self.batch] + sequence]
+
+                samples = np.clip(np.expand_dims(shuffle_indexes[i * self.batch:(i + 1) * self.batch], axis=1)
+                                  + sequence, a_max=len_replay_buffer-1, a_min=0)
+
+                yield replay_buffer[samples]
 
     def __len__(self):
         return np.inf

@@ -14,6 +14,7 @@ from config import consts, args
 from rbi_agent import RBIAgent
 from ape_agent import ApeAgent
 from ppo_agent import PPOAgent
+from rbi_rnn_agent import RBIRNNAgent
 
 from logger import logger
 from distutils.dir_util import copy_tree
@@ -118,6 +119,8 @@ class Experiment(object):
 
         if args.algorithm == "rbi":
             return RBIAgent
+        elif args.algorithm == "rbi_rnn":
+            return RBIRNNAgent
         elif args.algorithm == "ape":
             return ApeAgent
         elif args.algorithm == "ppo":
@@ -315,7 +318,7 @@ class Experiment(object):
             self.comet = comet.Experiment(api_key=consts.api_key, project_name="rbi")
             self.comet.log_multiple_params(vars(args))
 
-        if args.algorithm == "rbi":
+        if args.algorithm == "rbi" or args.algorithm == "rbi_rnn":
             results = {'n': 0,
                        'statistics': {
                            'reroute': {'player': 'reroutetv', 'cmin': args.cmin, 'cmax': args.cmax, 'delta': args.delta, 'score': 0, 'high': 0, 'frames':1},

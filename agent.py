@@ -13,7 +13,6 @@ class Agent(object):
         self.update_target_interval = args.update_target_interval
         self.update_memory_interval = args.update_memory_interval
         self.load_memory_interval = args.load_memory_interval
-        self.off_policy_initialization = args.off_policy_initialization
         self.action_space = len(np.nonzero(consts.actions[args.game])[0])
         self.skip = args.skip
         self.termination_reward = args.termination_reward
@@ -61,6 +60,9 @@ class Agent(object):
 
         self.mix = self.delta
         self.min_loop = 1. / 44
+        self.hidden_state = args.hidden_features_rnn
+        self.seq_length = args.seq_length
+        self.burn_in = args.burn_in
 
     def save_checkpoint(self, path, aux=None):
         raise NotImplementedError

@@ -364,14 +364,14 @@ class DuelRNN(nn.Module):
 
         # value net
         self.fc_v = nn.Sequential(
-            nn.Linear(args.hidden_state, 128),
+            nn.Linear(args.hidden_features_rnn, 128),
             nn.ReLU(),
             nn.Linear(128, 1),
         )
 
         # advantage net
         self.fc_adv = nn.Sequential(
-            nn.Linear(args.hidden_state, 128),
+            nn.Linear(args.hidden_features_rnn, 128),
             nn.ReLU(),
             nn.Linear(128, action_space),
         )
@@ -391,40 +391,101 @@ class DuelRNN(nn.Module):
             nn.ReLU(),
         )
 
-        self.rnn_adv = nn.GRU(128, args.hidden_state, 1, batch_first=True, dropout=0, bidirectional=False)
-        self.rnn_v = nn.GRU(128, args.hidden_state, 1, batch_first=True, dropout=0, bidirectional=False)
+        self.rnn_adv = nn.GRU(128, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
+        self.rnn_v = nn.GRU(128, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
 
         # initialization
-        self.cnn_conv1[0].bias.data.zero_()
-        self.cnn_conv2[0].bias.data.zero_()
-        self.cnn_conv3[0].bias.data.zero_()
+        self.cnn[0].bias.data.zero_()
+        self.cnn[2].bias.data.zero_()
+        self.cnn[4].bias.data.zero_()
 
-    def forward(self, s, a, beta, h_adv, h_v):
+    def forward(self, s, a, beta, h_adv, h_v, batch):
 
         # state CNN
-        batch, seq, channel, height, width = s.shape
-        s = s.view(batch * seq, channel, height, width)
+        # batch, seq, channel, height, width = s.shape
+        # s = s.view(batch * seq, channel, height, width)
+        # s = self.cnn(s)
+        # s = s.view(batch, seq, 3136)
+
+        # batch_seq, channel, height, width = s.shape
         s = self.cnn(s)
-        s = s.view(batch, seq, 3136)
+        s = s.view(batch, -1, 3136)
+
         s = self.pre_lstm(s)
+        s = s.contiguous()
 
         s_adv, h_adv = self.rnn_adv(s, h_adv)
         s_v, h_v = self.rnn_v(s, h_v)
 
         v = self.fc_v(s_v)
-        adv_tilde = self.fc_a(s_adv)
+        adv_tilde = self.fc_adv(s_adv)
 
         bias = (adv_tilde * beta).sum(2).unsqueeze(2)
-        bias = bias.repeat(2, action_space)
-
         adv = adv_tilde - bias
 
         adv_a = adv.gather(2, a).squeeze(2)
-        q = v.repeat(2, action_space) + adv
+        q = v + adv
+
         # q = hinv_torch(q)
         q_a = q.gather(2, a).squeeze(2)
 
-        return v, adv, adv_a, q, q_a
+        return v, adv, adv_a, q, q_a, h_adv.detach(), h_v.detach()
+
+
+class BehavioralRNN(nn.Module):
+
+    def __init__(self, drop=True):
+
+        super(BehavioralRNN, self).__init__()
+
+        self.batch = args.batch
+        # batch normalization and dropout
+        self.cnn = nn.Sequential(
+            nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU(),
+        )
+
+        self.pre_lstm = nn.Sequential(
+            nn.Linear(3136, 128),
+            nn.ReLU(),
+        )
+
+        # advantage net
+        self.fc_beta = nn.Sequential(
+            nn.Linear(args.hidden_features_rnn, 128),
+            nn.ReLU(),
+            nn.Linear(128, action_space),
+        )
+
+        self.rnn = nn.GRU(128, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
+
+        # initialization
+        self.cnn[0].bias.data.zero_()
+        self.cnn[2].bias.data.zero_()
+        self.cnn[4].bias.data.zero_()
+
+    def forward(self, s, h, batch):
+
+        # state CNN
+
+        # state CNN
+        # batch, seq, channel, height, width = s.shape
+        # s = s.view(-1, channel, height, width)
+
+        # batch_seq, channel, height, width = s.shape
+        s = self.cnn(s)
+        s = s.view(batch, -1, 3136)
+        s = self.pre_lstm(s)
+        s = s.contiguous()
+
+        s, h = self.rnn(s, h)
+        beta = self.fc_beta(s)
+
+        return beta, h.detach()
 
 
 class HInv(torch.autograd.Function):

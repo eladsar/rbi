@@ -16,34 +16,34 @@ if [ $game = "breakout" ]; then
     tensor="--no-tensorboard"
 fi
 
-CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=0 &
-CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=1 &
-CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=2 &
-CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=3 &
-CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=4 &
-CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=5 &
+CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=0 &
+CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=1 &
+CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=2 &
+CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=3 &
+CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=4 &
+CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=5 &
 
-CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=16 &
-CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=19 &
+#CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=21 &
+#CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=19 &
 
 
-CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=6 &
-CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=7 &
-CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=8 &
-CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=9 &
-CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=10 &
-CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=11 &
+CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=6 &
+CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=7 &
+CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=8 &
+CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=9 &
+CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=10 &
+CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=11 &
 
-CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=17 &
-CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=20 &
+#CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=18 &
+#CUDA_VISIBLE_DEVICES=2, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=20 &
 
-CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=12 &
-CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=13 &
-CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=14 &
-CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=15 &
+CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=12 &
+CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=13 &
+CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=14 &
+CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=15 &
 
-CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=18 &
-CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=22 --actor-index=21 &
+CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=16 &
+CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=17 &
 
 CUDA_VISIBLE_DEVICES=0, python main.py --clean --identifier=$identifier --resume=$resume --load-last-model --game=$game &
 CUDA_VISIBLE_DEVICES=3, python main.py --choose --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --play-episodes-interval=16 --wait=150 $tensor &

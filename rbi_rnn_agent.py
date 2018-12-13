@@ -9,8 +9,9 @@ from torch.nn import functional as F
 from config import consts, args
 import psutil
 import socket
+import pandas as pd
 
-from model import BehavioralNet, DuelNet
+from model import BehavioralRNN, DuelRNN
 
 from memory_rnn import ObservationsRNNMemory, ObservationsRNNBatchSampler
 from agent import Agent
@@ -30,7 +31,7 @@ class RBIRNNAgent(Agent):
 
     def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
 
-        print("Learning with RBIAgent")
+        print("Learning with RBIRNNAgent")
         super(RBIRNNAgent, self).__init__()
         self.checkpoint = checkpoint
         self.root_dir = root_dir
@@ -44,8 +45,8 @@ class RBIRNNAgent(Agent):
 
         self.device = torch.device("cuda:%d" % self.cuda_id)
 
-        self.beta_net = BehavioralNet().to(self.device)
-        self.value_net = DuelNet().to(self.device)
+        self.beta_net = BehavioralRNN().to(self.device)
+        self.value_net = DuelRNN().to(self.device)
 
         self.pi_rand = np.ones(self.action_space) / self.action_space
         self.pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(
@@ -147,40 +148,52 @@ class RBIRNNAgent(Agent):
         for n, sample in tqdm(enumerate(self.train_loader)):
 
             s = sample['s'].to(self.device)
-            a = sample['a'].to(self.device).unsqueeze_(1)
-            r = sample['r'].to(self.device)
-            rho = sample['rho'].to(self.device)
-            pi = sample['pi'].to(self.device)
-            h_adv = sample['h_adv'].to(self.device)
+            a = sample['a'].to(self.device).unsqueeze_(2)
+            r = sample['r'].to(self.device)[:, self.burn_in:].contiguous()
+            rho = sample['rho'].to(self.device)[:, self.burn_in:, :].contiguous()
+            pi = sample['pi'].to(self.device)[:, self.burn_in:, :].contiguous()
+            h_adv = sample['h_adv'].to(self.device).unsqueeze_(0)
+            h_v = sample['h_v'].to(self.device).unsqueeze_(0)
+            h_beta = sample['h_beta'].to(self.device).unsqueeze_(0)
+
+            batch, seq, channel, height, width = s.shape
+            s = s.view(-1, channel, height, width)
+            s_bi, s = torch.split(s, [self.burn_in * batch, self.seq_length * batch], dim=0)
+            a_bi, a = torch.split(a, [self.burn_in, self.seq_length], dim=1)
+            # burn in
+
+            beta, h_beta = self.beta_net(s_bi, h_beta, batch)
+            beta = F.softmax(beta.detach(), dim=1)
+
+            _, _, _, _, _, h_adv, h_v = self.value_net(s_bi, a_bi, beta, h_adv, h_v, batch)
 
             # Behavioral nets
-            beta = self.beta_net(s, aux)
+            beta, _ = self.beta_net(s, h_beta, batch)
             beta_log = F.log_softmax(beta, dim=1)
 
             beta = F.softmax(beta.detach(), dim=1)
-            v, adv_eval, adv_a, _, q_a = self.value_net(s, a, beta, aux)
+            v, adv_eval, adv_a, _, q_a, _, _ = self.value_net(s, a, beta, h_adv, h_v, batch)
 
-            v = v.squeeze(1)
+            v = v.squeeze(2)
             v_eval = v.detach()
             q_a_eval = q_a.detach()
             adv_eval = adv_eval.detach()
 
             is_value = (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
-            # is_value = ((r - q_a_eval).abs() + 0.001) ** self.priority_beta
             is_value = is_value / is_value.mean()
 
-            # beta = 0.9 * beta + 0.1 * self.pi_rand_batch
             beta_mix = (1 - self.entropy_loss) * beta + self.entropy_loss / self.action_space
-            std_q = ((beta_mix * adv_eval ** 2).sum(dim=1)) ** 0.5
+            std_q = ((beta_mix * adv_eval ** 2).sum(dim=2)) ** 0.5
             is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** self.priority_beta
             is_policy = is_policy / is_policy.mean()
-            # is_policy = 1
 
             rho = torch.clamp(rho, 0, 1)
-            # rho = torch.clamp(rho, 1, 1)
-            loss_value = ((v_eval * (1 - rho[:, 0]) + v * rho[:, 0] + adv_a - r) ** 2 * is_value * rho[:, 1]).mean()
+            rho_v, rho_q = rho[:, :, 0], rho[:, :, 1]
 
-            loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
+            loss_value = ((v_eval * (1 - rho_v) + v * rho_v + adv_a - r) ** 2 * is_value * rho_q).mean()
+
+            loss_beta = ((-pi * beta_log).sum(dim=2) * is_policy).mean()
+
             # Learning part
 
             self.optimizer_beta.zero_grad()
@@ -191,29 +204,26 @@ class RBIRNNAgent(Agent):
             loss_value.backward()
             self.optimizer_value.step()
 
-            # time.sleep(max(0, self.min_loop - (time.time() - tic)))
-            # tic = time.time()
-
             # collect actions statistics
 
             if not (n + 1 + self.n_offset) % 50:
 
-                a_exploit = a[: self.batch_exploit]
+                a_exploit = a[: self.batch_exploit, 0, :]
                 a_index_np = a_exploit[:, 0].data.cpu().numpy()
 
                 # avoid zero pi
-                pi = pi.clamp(min=1e-4, max=1)
+                pi = pi[:, 0, :].clamp(min=1e-4, max=1)
                 pi /= pi.sum(dim=1).unsqueeze(1).repeat(1, self.action_space)
 
                 pi_log = pi.log()
-                beta_soft = F.softmax(beta, dim=1).detach()
+                beta_soft = F.softmax(beta[:, 0, :], dim=1).detach()
 
                 Hpi = -(pi * pi_log).sum(dim=1)
-                Hbeta = -(beta_soft * beta_log).sum(dim=1)
+                Hbeta = -(beta_soft * beta_log[:, 0, :]).sum(dim=1)
 
-                adv_a = rho.data.cpu().numpy()[: self.batch_exploit]
-                q_a = q_a.data.cpu().numpy()[: self.batch_exploit]
-                r = r.data.cpu().numpy()[: self.batch_exploit]
+                adv_a = rho[:, 0, 0].data.cpu().numpy()[: self.batch_exploit]
+                q_a = q_a[:, 0].data.cpu().numpy()[: self.batch_exploit]
+                r = r[:, 0].data.cpu().numpy()[: self.batch_exploit]
 
                 _, beta_index = beta_soft[:self.batch_exploit].data.cpu().max(1)
                 beta_index = beta_index.numpy()
@@ -417,7 +427,6 @@ class RBIRNNAgent(Agent):
         a_zeros_mp = self.a_zeros.repeat(n_players, 1, 1)
         mp_pi_rand = np.repeat(np.expand_dims(self.pi_rand, axis=0), n_players, axis=0)
 
-
         range_players = np.arange(n_players)
         rewards = [[[]] for _ in range(n_players)]
         v_target = [[[]] for _ in range(n_players)]
@@ -426,6 +435,7 @@ class RBIRNNAgent(Agent):
         image_dir = ['' for _ in range(n_players)]
         trajectory = [[] for _ in range(n_players)]
         screen_dir = [os.path.join(self.explore_dir, "screen")] * n_players
+        fr_s = [self.frame + self.history_length - 1 for _ in range(n_players)]
 
         trajectory_dir = [os.path.join(self.explore_dir, "trajectory")] * n_players
 
@@ -447,20 +457,18 @@ class RBIRNNAgent(Agent):
         h_beta = torch.zeros(1, n_players, self.hidden_state).to(self.device)
 
         # build burn-in sequence
-        burnin = {"fr": 0, "a": 0, "r": np.zeros(1, dtype=np.float32)[0], "pi": np.zeros(self.action_space, dtype=np.float32),
-                  "rho": np.ones(2, dtype=np.float32), "h_beta": np.zeros(self.hidden_state, dtype=np.float32),
-                  "h_adv": np.zeros(self.hidden_state, dtype=np.float32),
-                  "h_v": np.zeros(self.hidden_state, dtype=np.float32), "ep": -1, "t": 0}
-        burnin = [burnin] * self.burn_in
-        image_dir_burn_in = os.path.join(screen_dir[0], str(-1))
-        os.mkdir(image_dir_burn_in)
-        cv2.imwrite(os.path.join(image_dir_burn_in, "%s.png" % str(0)),
-                    np.zeros((args.height, args.width), dtype=np.float32), [imcompress, compress_level])
+        # burnin = {"fr": 0, "a": 0, "r": np.zeros(1, dtype=np.float32)[0], "pi": np.zeros(self.action_space, dtype=np.float32),
+        #           "rho": np.zeros(2, dtype=np.float32), "h_beta": np.zeros(self.hidden_state, dtype=np.float32),
+        #           "h_adv": np.zeros(self.hidden_state, dtype=np.float32),
+        #           "h_v": np.zeros(self.hidden_state, dtype=np.float32), "ep": -1, "t": 1}
+        # burnin = [burnin] * self.burn_in
 
         for i in range(n_players):
             mp_env[i].reset()
             image_dir[i] = os.path.join(screen_dir[i], str(episode_num[i]))
             os.mkdir(image_dir[i])
+            # cv2.imwrite(os.path.join(image_dir[i], "%s.png" % str(-1)),
+            #             np.zeros((args.height, args.width), dtype=np.float32), [imcompress, compress_level])
 
         lives = [mp_env[i].lives for i in range(n_players)]
 
@@ -476,19 +484,22 @@ class RBIRNNAgent(Agent):
                 self.value_net.eval()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device).unsqueeze(1)
+            batch, seq, channel, height, width = s.shape
+            s = s.view(-1, channel, height, width)
 
-            beta, h_beta = self.beta_net(s, h_beta)
-            beta = F.softmax(beta.squeeze(1).detach(), dim=1)
+            beta, h_beta = self.beta_net(s, h_beta, batch)
+            beta = F.softmax(beta.detach(), dim=1)
             # take q as adv
-            v_expected, adv, _, q, _, h_adv, h_v = self.value_net(s, a_zeros_mp, beta, h_adv, h_v)
+            v_expected, adv, _, q, _, h_adv, h_v = self.value_net(s, a_zeros_mp, beta, h_adv, h_v, batch)
 
             # hidden state to np object
+
             h_beta_np = h_beta.squeeze(0).data.cpu().numpy()
             h_adv_np = h_adv.squeeze(0).data.cpu().numpy()
             h_v_np = h_v.squeeze(0).data.cpu().numpy()
 
             q = q.squeeze(1).data.cpu().numpy()
-            beta = beta.data.cpu().numpy()
+            beta = beta.squeeze(1).data.cpu().numpy()
 
             adv = adv.squeeze(1).data.cpu().numpy()
             v_expected = v_expected.squeeze(1).squeeze(1).data.cpu().numpy()
@@ -550,7 +561,7 @@ class RBIRNNAgent(Agent):
                 cv2.imwrite(os.path.join(image_dir[i], "%s.png" % str(self.frame)), mp_env[i].image, [imcompress, compress_level])
                 episode[i].append({"fr": self.frame, "a": a, "r": 0, "pi": pi[i], "rho": 0,
                                    "h_beta": h_beta_np[i], "h_adv": h_adv_np[i], "h_v": h_v_np[i],
-                                   "ep": episode_num[i], "t": 0})
+                                   "ep": episode_num[i], "t": 0, 'fr_s': fr_s[i], 'fr_e': 0})
 
                 env.step(a)
 
@@ -569,21 +580,21 @@ class RBIRNNAgent(Agent):
                     # cancel termination reward
                     rewards[i][-1][-1] -= self.termination_reward * int(env.k * self.skip >= self.max_length or env.score >= self.max_score)
                     td_val = get_td_value(rewards[i], v_target[i], self.discount, self.n_steps)
-                    # rho_val = get_rho_is(rho[i], self.n_steps) if explore_threshold[i] >= 0 else np.ones(td_val.shape, dtype=np.float32)
                     rho_val = get_rho_is(rho[i], self.n_steps)
 
                     rho_vec = np.concatenate(rho[i])
                     for j, record in enumerate(episode[i]):
                         record['r'] = td_val[j]
-                        # record['rho'] = rho_val[j]
                         record['rho'] = np.array([rho_vec[j], rho_val[j]], dtype=np.float32)
+                        record['fr_e'] = self.frame + 1
 
-                    trajectory[i] += (burnin + episode[i][self.history_length-1:(min(self.max_length, len(episode[i])) - self.seq_length)])
+                    # trajectory[i] += (burnin + episode[i][self.history_length-1:(min(self.max_length, len(episode[i])) - self.seq_length)])
+                    trajectory[i] += episode[i][self.history_length - 1:(min(self.max_length, len(episode[i])) - self.seq_length)]
 
                     # reset hidden states
-                    h_v[i, :].zero_()
-                    h_beta[i, :].zero_()
-                    h_adv[i, :].zero_()
+                    h_v[:, i, :].zero_()
+                    h_beta[:, i, :].zero_()
+                    h_adv[:, i, :].zero_()
 
                     print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
                           (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), mp_trigger[i], time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
@@ -594,6 +605,7 @@ class RBIRNNAgent(Agent):
                     v_target[i] = [[]]
                     lives[i] = env.lives
                     mp_trigger[i] = 0
+                    fr_s[i] = (self.frame + 1) + (self.history_length - 1)
 
                     # get new episode number
 
@@ -607,6 +619,8 @@ class RBIRNNAgent(Agent):
 
                     image_dir[i] = os.path.join(screen_dir[i], str(episode_num[i]))
                     os.mkdir(image_dir[i])
+                    # cv2.imwrite(os.path.join(image_dir[i], "%s.png" % str(-1)),
+                    #             np.zeros((args.height, args.width), dtype=np.float32), [imcompress, compress_level])
 
                     if len(trajectory[i]) >= self.player_replay_size:
 
