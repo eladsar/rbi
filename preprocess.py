@@ -41,12 +41,7 @@ infinite_horizon = args.infinite_horizon
 r_scale = consts.scale_reward[args.game]
 friction = args.friction_reward
 termination_reward = args.termination_reward
-
-# if clip:
-#
-# else:
-#     termination_reward = args.termination_reward * r_scale
-
+reward_shape = args.reward_shape
 
 def convert_screen_to_rgb(img, resize=False):
     img = cv2.cvtColor(img.numpy(), img_gray2rgb)
@@ -90,59 +85,6 @@ def _h_torch(r):
 
 def _hinv_torch(r):
     return torch.sign(r) * (((torch.sqrt(1 + 0.04 * (torch.abs(r) + 1.01)) - 1) / 0.02) ** 2 - 1)
-#
-# def _hinv_np_tag(r):
-#     raise NotImplementedError
-#
-# def _hinv_torch_tag(r):
-#     return 100 - 5000 / torch.sqrt(100 * torch.abs(r) + 2601)
-
-# def _h_np(r):
-#     a = np.abs(r)
-#     piece = (a <= 1)
-#     return np.sign(r) * (a * piece + (2 * np.sqrt(np.maximum(a, 0)) - 1) * (1 - piece))
-#
-#
-# def _hinv_np(r):
-#     a = np.abs(r)
-#     piece = (a <= 1)
-#     return np.sign(r) * (a * piece + (0.25 * a ** 2 + 0.5 * a + 0.25) * (1 - piece))
-#
-#
-# def _h_torch(r):
-#     a = torch.abs(r)
-#     piece = (a <= 1).float()
-#     return torch.sign(r) * (a * piece + (2 * torch.sqrt(torch.clamp(a, min=0)) - 1) * (1 - piece))
-#
-#
-# def _hinv_torch(r):
-#     a = torch.abs(r)
-#     piece = (a <= 1).float()
-#     return torch.sign(r) * (a * piece + (0.25 * a ** 2 + 0.5 * a + 0.25) * (1 - piece))
-
-
-# def _h_np(r):
-#     a = np.abs(r)
-#     piece = (a <= 9)
-#     return np.sign(r) * (a * piece + (7 + 2 * np.sqrt(np.maximum(a - 8, 0))) * (1 - piece))
-#
-#
-# def _hinv_np(r):
-#     a = np.abs(r)
-#     piece = (a <= 9)
-#     return np.sign(r) * (a * piece + (a ** 2 - 14 * a + 81) / 4 * (1 - piece))
-#
-#
-# def _h_torch(r):
-#     a = torch.abs(r)
-#     piece = (a <= 9).float()
-#     return torch.sign(r) * (a * piece + (7 + 2 * torch.sqrt(torch.clamp(a - 8, min=0))) * (1 - piece))
-#
-#
-# def _hinv_torch(r):
-#     a = torch.abs(r)
-#     piece = (a <= 9).float()
-#     return torch.sign(r) * (a * piece + (a ** 2 - 14 * a + 81) / 4 * (1 - piece))
 
 def _hinv_np_tag(r):
     raise NotImplementedError
@@ -172,7 +114,7 @@ else:
     hinv_torch_tag = _idle
 
 
-def get_mc_value(rewards, discount):
+def _get_mc_value(rewards, v_target, discount, n_steps):
 
     if infinite_horizon:
         rewards = [list(itertools.chain(*rewards))]
@@ -189,8 +131,6 @@ def get_mc_value(rewards, discount):
         r = np.array(rewards[life])
         if clip > 0:
             r = np.clip(r, -clip, clip)
-        else:
-            r = r / r_scale
 
         r[-1] += termination_reward
         val = np.zeros(r.shape)
@@ -202,7 +142,11 @@ def get_mc_value(rewards, discount):
     return np.concatenate(values).astype(np.float32)
 
 
-def get_td_value(rewards, v_target, discount, n_steps):
+def _get_td_value(rewards, v_target, discount, n_steps):
+
+    if infinite_horizon:
+        rewards = [list(itertools.chain(*rewards))]
+        v_target = [list(itertools.chain(*v_target))]
 
     lives = len(rewards)
 
@@ -219,16 +163,26 @@ def get_td_value(rewards, v_target, discount, n_steps):
         r = np.array(rewards[life], dtype=np.float64)
         v_t = np.concatenate((np.array(v_target[life], dtype=np.float64), np.zeros(n_steps)))
 
-        r = np.clip(r, -clip, clip)
+        if clip > 0:
+            r = np.clip(r, -clip, clip)
         r[-1] += termination_reward
 
         val = np.correlate(r, discounts, mode="full")[n_steps-1:]
-        val += discount ** n_steps * v_t[n_steps:]
+
+        if reward_shape:
+            val = h_np(val + discount ** n_steps * hinv_np(v_t[n_steps:]))
+        else:
+            val += discount ** n_steps * v_t[n_steps:]
 
         values.append(val)
 
     return np.concatenate(values).astype(np.float32)
 
+
+if args.td:
+    get_expected_value = _get_td_value
+else:
+    get_expected_value = _get_mc_value
 
 def get_gae_est(rewards, v_target, discount):
 
@@ -259,6 +213,9 @@ def get_gae_est(rewards, v_target, discount):
 
 def get_rho_is(rho, n_steps):
 
+    if infinite_horizon:
+        rho = [list(itertools.chain(*rho))]
+
     lives = len(rho)
 
     rho_is = []
@@ -278,76 +235,6 @@ def get_rho_is(rho, n_steps):
         rho_is.append(val)
 
     return np.minimum(np.concatenate(rho_is), clip_rho).astype(np.float32)
-
-
-# def get_td_value(rewards, v_target, discount, n_steps):
-#
-#     if infinite_horizon:
-#         rewards = [list(itertools.chain(*rewards))]
-#         v_target = [list(itertools.chain(*v_target))]
-#
-#     lives = len(rewards)
-#
-#     values = []
-#     for life in range(lives):
-#
-#         episode_len = len(rewards[life])
-#
-#         if not episode_len:
-#             continue
-#
-#         discounts = discount ** np.arange(len(rewards[life])+1)
-#
-#         r = np.array(rewards[life], dtype=np.float64)
-#         v_t = np.array(v_target[life], dtype=np.float64)
-#
-#         if clip > 0:
-#             r = np.clip(r, -clip, clip)
-#         else:
-#             r = r / r_scale
-#             # r = np.sign(r) * np.log(np.abs(r) + 1)
-#
-#         r[-1] += termination_reward
-#         val = np.zeros(r.shape)
-#         for i in range(len(r)):
-#             val[i] = (r[i:] * discounts[:-i-1]).sum()
-#
-#         if episode_len > n_steps:
-#             val_shift = discount ** n_steps * np.concatenate((val[n_steps:], np.zeros(n_steps)))
-#             v_t_shift = discount ** n_steps * np.concatenate((v_t[n_steps:], np.zeros(n_steps)))
-#             val = val - val_shift + v_t_shift
-#
-#         values.append(val)
-#
-#     return np.concatenate(values).astype(np.float32)
-
-
-# def get_rho_is(rho, n_steps):
-#
-#     if infinite_horizon:
-#         rho = [list(itertools.chain(*rho))]
-#
-#     lives = len(rho)
-#
-#     rho_is = []
-#     for life in range(lives):
-#
-#         episode_len = len(rho[life])
-#
-#         if not episode_len:
-#             continue
-#
-#         v_t = np.array(rho[life], dtype=np.float64)
-#         val = np.zeros(v_t.shape)
-#         v_t = np.concatenate((v_t, np.ones(n_steps)))
-#
-#         val[0] = np.prod(v_t[1:n_steps])
-#         for i in range(1, len(val)):
-#             val[i] = val[i - 1] / v_t[i] * v_t[i + n_steps]
-#
-#         rho_is.append(val)
-#
-#     return np.minimum(np.concatenate(rho_is), clip_rho).astype(np.float32)
 
 
 def get_tde_value(rewards, discount, n_steps):

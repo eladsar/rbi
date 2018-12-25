@@ -21,191 +21,100 @@ aux_features = 1
 batch_momentum = 0.0002
 action_space = len(np.nonzero(consts.actions[args.game])[0])
 
+class DuelNet(nn.Module):
 
-class BehavioralNet(nn.Module):
+    def __init__(self):
 
-    def __init__(self, drop=True):
+        super(DuelNet, self).__init__()
 
-        super(BehavioralNet, self).__init__()
+        # value net
+        self.fc_v = nn.Sequential(
+            nn.Linear(3136 + aux_features, args.hidden_features),
+            nn.ReLU(),
+            nn.Linear(args.hidden_features, 1),
+        )
 
-        if drop and drop_arg:
-            drop_out_this = drop_out
-            drop_in_this = drop_in
-            # drop_out_this = 0
-            # drop_in_this = 0
-        else:
-            drop_out_this = 0
-            drop_in_this = 0
-
-        # policy estimator
-        self.fc_beta = nn.Sequential(
-            # nn.Dropout(drop_out_this),
-            nn.Linear(features_behavior, action_space),
+        # advantage net
+        self.fc_adv = nn.Sequential(
+            nn.Linear(3136 + aux_features, args.hidden_features),
+            nn.ReLU(),
+            nn.Linear(args.hidden_features, action_space),
         )
 
         # batch normalization and dropout
-        self.cnn_conv1 = nn.Sequential(
-            # nn.Dropout(drop_in_this),
+        self.cnn = nn.Sequential(
             nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
-            # nn.InstanceNorm2d(32, eps=1e-05),
-            # nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4, bias=False),
-            # nn.BatchNorm2d(32, eps=1e-05, momentum=batch_momentum, affine=True),
-            nn.ReLU()
-        )
-
-        self.cnn_conv2 = nn.Sequential(
+            nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            # nn.InstanceNorm2d(64, eps=1e-05),
-            # nn.Conv2d(32, 64, kernel_size=4, stride=2, bias=False),
-            # nn.BatchNorm2d(64, eps=1e-05, momentum=batch_momentum, affine=True),
-            nn.ReLU()
-        )
-
-        self.cnn_conv3 = nn.Sequential(
+            nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            # nn.InstanceNorm2d(64, eps=1e-05),
-            # nn.Conv2d(64, 64, kernel_size=3, stride=1, bias=False),
-            # nn.BatchNorm2d(64, eps=1e-05, momentum=batch_momentum, affine=True),
-            nn.ReLU()
-        )
-
-        self.cnn_h = nn.Sequential(
-            # nn.Dropout(drop_out_this),
-            nn.Linear(3136 + aux_features, features_behavior),
-            # nn.InstanceNorm1d(features, eps=1e-05),
-            # nn.Linear(3136 + aux_features, features, bias=False),
-            # nn.BatchNorm1d(features, eps=1e-05, momentum=batch_momentum, affine=True),
             nn.ReLU(),
         )
 
         # initialization
-        self.cnn_conv1[0].bias.data.zero_()
-        self.cnn_conv2[0].bias.data.zero_()
-        self.cnn_conv3[0].bias.data.zero_()
+        self.cnn[0].bias.data.zero_()
+        self.cnn[2].bias.data.zero_()
+        self.cnn[4].bias.data.zero_()
+
+    def forward(self, s, a, beta, aux):
+
+        # state CNN
+        s = self.cnn(s)
+        s = torch.cat((s.view(s.size(0), -1), aux), dim=1)
+
+        v = self.fc_v(s)
+        adv_tilde = self.fc_adv(s)
+
+        bias = (adv_tilde * beta).sum(1).unsqueeze(1)
+        adv = adv_tilde - bias
+
+        adv_a = adv.gather(1, a).squeeze(1)
+        q = v + adv
+
+        q_a = q.gather(1, a).squeeze(1)
+
+        return v, adv, adv_a, q, q_a
+
+
+class BehavioralNet(nn.Module):
+
+    def __init__(self):
+
+        super(BehavioralNet, self).__init__()
+
+        # batch normalization and dropout
+        self.cnn = nn.Sequential(
+            nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU(),
+        )
+
+
+        # advantage net
+        self.fc_beta = nn.Sequential(
+            nn.Linear(3136 + aux_features, args.hidden_features),
+            nn.ReLU(),
+            nn.Linear(args.hidden_features, action_space),
+        )
+
+        # initialization
+        self.cnn[0].bias.data.zero_()
+        self.cnn[2].bias.data.zero_()
+        self.cnn[4].bias.data.zero_()
+
 
     def forward(self, s, aux):
 
         # state CNN
 
-        s = self.cnn_conv1(s)
-        s = self.cnn_conv2(s)
-        s = self.cnn_conv3(s)
-        # s = self.cnn_h(torch.cat((s.view(s.size(0), -1), aux), dim=1).unsqueeze(1)).squeeze(1)
-        s = self.cnn_h(torch.cat((s.view(s.size(0), -1), aux), dim=1))
-        # behavioral estimator
+        s = self.cnn(s)
+        s = torch.cat((s.view(s.size(0), -1), aux), dim=1)
         beta = self.fc_beta(s)
 
         return beta
-
-
-class DuelNet(nn.Module):
-
-    def __init__(self, drop=True):
-
-        super(DuelNet, self).__init__()
-
-        if drop and drop_arg:
-            drop_out_this = drop_out
-            drop_in_this = drop_in
-            # drop_out_this = 0
-            # drop_in_this = 0
-        else:
-            drop_out_this = 0
-            drop_in_this = 0
-
-        # value net
-        self.fc_v = nn.Sequential(
-            # nn.Dropout(drop_out_this),
-            nn.Linear(features_value, 1),
-        )
-
-        # advantage net
-        self.fc_adv = nn.Sequential(
-            # nn.Dropout(drop_out_this),
-            nn.Linear(features_value, action_space),
-        )
-
-        # batch normalization and dropout
-        self.cnn_conv1 = nn.Sequential(
-            # nn.Dropout(drop_in_this),
-            nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
-            # nn.InstanceNorm2d(32, eps=1e-05),
-            # nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4, bias=False),
-            # nn.BatchNorm2d(32, eps=1e-05, momentum=batch_momentum, affine=True),
-            nn.ReLU()
-        )
-
-        self.cnn_conv2 = nn.Sequential(
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            # nn.InstanceNorm2d(64, eps=1e-05),
-            # nn.Conv2d(32, 64, kernel_size=4, stride=2, bias=False),
-            # nn.BatchNorm2d(64, eps=1e-05, momentum=batch_momentum, affine=True),
-            nn.ReLU()
-        )
-
-        self.cnn_conv3 = nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            # nn.InstanceNorm2d(64, eps=1e-05),
-            # nn.Conv2d(64, 64, kernel_size=3, stride=1, bias=False),
-            # nn.BatchNorm2d(64, eps=1e-05, momentum=batch_momentum, affine=True),
-            nn.ReLU(),
-        )
-
-        self.fc_h_v = nn.Sequential(
-            # nn.Dropout(drop_out_this),
-            nn.Linear(3136 + aux_features, features_value),
-            # nn.InstanceNorm1d(features, eps=1e-05),
-            # nn.Linear(3136 + aux_features, features, bias=False),
-            # nn.BatchNorm1d(features, eps=1e-05, momentum=batch_momentum, affine=True),
-            nn.ReLU(),
-        )
-
-        self.fc_h_a = nn.Sequential(
-            # nn.Dropout(drop_out_this),
-            nn.Linear(3136 + aux_features, features_value),
-            # nn.InstanceNorm1d(features, eps=1e-05),
-            # nn.Linear(3136 + aux_features, features, bias=False),
-            # nn.BatchNorm1d(features, eps=1e-05, momentum=batch_momentum, affine=True),
-            nn.ReLU(),
-        )
-
-        # initialization
-        self.cnn_conv1[0].bias.data.zero_()
-        self.cnn_conv2[0].bias.data.zero_()
-        self.cnn_conv3[0].bias.data.zero_()
-
-    def forward(self, s, a, beta, aux):
-
-        # state CNN
-
-        s = self.cnn_conv1(s)
-        s = self.cnn_conv2(s)
-        s = self.cnn_conv3(s)
-
-        # phi = s.detach()
-        # s = torch.cat((s.view(s.size(0), -1), aux), dim=1).unsqueeze(1)
-
-        s = torch.cat((s.view(s.size(0), -1), aux), dim=1)
-        s_v = self.fc_h_v(s)
-        s_a = self.fc_h_a(s)
-
-        # behavioral estimator
-        v = self.fc_v(s_v)
-
-        adv_tilde = self.fc_adv(s_a)
-
-        bias = (adv_tilde * beta).sum(1).unsqueeze(1)
-        # bias = adv_tilde.mean(1).unsqueeze(1)
-        bias = bias.repeat(1, action_space)
-
-        adv = adv_tilde - bias
-
-        adv_a = adv.gather(1, a).squeeze(1)
-        q = v.repeat(1, action_space) + adv
-        # q = hinv_torch(q)
-        q_a = q.gather(1, a).squeeze(1)
-
-        return v, adv, adv_a, q, q_a
 
 
 class ValueNet(nn.Module):
@@ -225,28 +134,12 @@ class ValueNet(nn.Module):
         )
 
         # batch normalization and dropout
-        self.cnn_conv1 = nn.Sequential(
-            # nn.Dropout(drop_in_this),
+        self.cnn = nn.Sequential(
             nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
-            # nn.InstanceNorm2d(32, eps=1e-05),
-            # nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4, bias=False),
-            # nn.BatchNorm2d(32, eps=1e-05, momentum=batch_momentum, affine=True),
-            nn.ReLU()
-        )
-
-        self.cnn_conv2 = nn.Sequential(
+            nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            # nn.InstanceNorm2d(64, eps=1e-05),
-            # nn.Conv2d(32, 64, kernel_size=4, stride=2, bias=False),
-            # nn.BatchNorm2d(64, eps=1e-05, momentum=batch_momentum, affine=True),
-            nn.ReLU()
-        )
-
-        self.cnn_conv3 = nn.Sequential(
+            nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            # nn.InstanceNorm2d(64, eps=1e-05),
-            # nn.Conv2d(64, 64, kernel_size=3, stride=1, bias=False),
-            # nn.BatchNorm2d(64, eps=1e-05, momentum=batch_momentum, affine=True),
             nn.ReLU(),
         )
 
@@ -323,17 +216,15 @@ class DQN(nn.Module):
         )
 
         # initialization
-        self.cnn_conv1[0].bias.data.zero_()
-        self.cnn_conv2[0].bias.data.zero_()
-        self.cnn_conv3[0].bias.data.zero_()
+        self.cnn[0].bias.data.zero_()
+        self.cnn[2].bias.data.zero_()
+        self.cnn[4].bias.data.zero_()
 
     def forward(self, s, a, aux):
 
         # state CNN
 
-        s = self.cnn_conv1(s)
-        s = self.cnn_conv2(s)
-        s = self.cnn_conv3(s)
+        s = self.cnn(s)
 
         s = torch.cat((s.view(s.size(0), -1), aux), dim=1)
         s_v = self.fc_h_v(s)
@@ -364,16 +255,18 @@ class DuelRNN(nn.Module):
 
         # value net
         self.fc_v = nn.Sequential(
-            nn.Linear(args.hidden_features_rnn, 128),
+            nn.Linear(3136, args.hidden_features),
+            # nn.Linear(args.hidden_features_rnn, args.hidden_features),
             nn.ReLU(),
-            nn.Linear(128, 1),
+            nn.Linear(args.hidden_features, 1),
         )
 
         # advantage net
         self.fc_adv = nn.Sequential(
-            nn.Linear(args.hidden_features_rnn, 128),
+            nn.Linear(3136, args.hidden_features),
+            # nn.Linear(args.hidden_features_rnn, args.hidden_features),
             nn.ReLU(),
-            nn.Linear(128, action_space),
+            nn.Linear(args.hidden_features, action_space),
         )
 
         # batch normalization and dropout
@@ -386,39 +279,28 @@ class DuelRNN(nn.Module):
             nn.ReLU(),
         )
 
-        self.pre_lstm = nn.Sequential(
-            nn.Linear(3136, 128),
-            nn.ReLU(),
-        )
-
-        self.rnn_adv = nn.GRU(128, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
-        self.rnn_v = nn.GRU(128, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
+        # self.rnn = nn.GRU(3136, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
 
         # initialization
         self.cnn[0].bias.data.zero_()
         self.cnn[2].bias.data.zero_()
         self.cnn[4].bias.data.zero_()
 
-    def forward(self, s, a, beta, h_adv, h_v, batch):
+        # self.rnn.bias_ih_l0.data[:args.hidden_features_rnn].fill_(0.5)
+        # self.rnn.bias_hh_l0.data[:args.hidden_features_rnn].fill_(0.5)
+
+    def forward(self, s, a, beta, h):
 
         # state CNN
-        # batch, seq, channel, height, width = s.shape
-        # s = s.view(batch * seq, channel, height, width)
-        # s = self.cnn(s)
-        # s = s.view(batch, seq, 3136)
-
-        # batch_seq, channel, height, width = s.shape
+        batch, seq, channel, height, width = s.shape
+        s = s.view(batch * seq, channel, height, width)
         s = self.cnn(s)
-        s = s.view(batch, -1, 3136)
+        s = s.view(batch, seq, 3136)
 
-        s = self.pre_lstm(s)
-        s = s.contiguous()
+        # s, h = self.rnn(s, h)
 
-        s_adv, h_adv = self.rnn_adv(s, h_adv)
-        s_v, h_v = self.rnn_v(s, h_v)
-
-        v = self.fc_v(s_v)
-        adv_tilde = self.fc_adv(s_adv)
+        v = self.fc_v(s)
+        adv_tilde = self.fc_adv(s)
 
         bias = (adv_tilde * beta).sum(2).unsqueeze(2)
         adv = adv_tilde - bias
@@ -429,7 +311,7 @@ class DuelRNN(nn.Module):
         # q = hinv_torch(q)
         q_a = q.gather(2, a).squeeze(2)
 
-        return v, adv, adv_a, q, q_a, h_adv.detach(), h_v.detach()
+        return v, adv, adv_a, q, q_a, h.detach()
 
 
 class BehavioralRNN(nn.Module):
@@ -449,40 +331,36 @@ class BehavioralRNN(nn.Module):
             nn.ReLU(),
         )
 
-        self.pre_lstm = nn.Sequential(
-            nn.Linear(3136, 128),
-            nn.ReLU(),
-        )
+        self.rnn = nn.GRU(3136, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
 
         # advantage net
         self.fc_beta = nn.Sequential(
-            nn.Linear(args.hidden_features_rnn, 128),
+            nn.Linear(3136, args.hidden_features),
+            # nn.Linear(args.hidden_features_rnn, args.hidden_features),
             nn.ReLU(),
-            nn.Linear(128, action_space),
+            nn.Linear(args.hidden_features, action_space),
         )
-
-        self.rnn = nn.GRU(128, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
 
         # initialization
         self.cnn[0].bias.data.zero_()
         self.cnn[2].bias.data.zero_()
         self.cnn[4].bias.data.zero_()
 
-    def forward(self, s, h, batch):
+        # self.rnn.bias_ih_l0.data[:args.hidden_features_rnn].fill_(0.5)
+        # self.rnn.bias_hh_l0.data[:args.hidden_features_rnn].fill_(0.5)
+
+    def forward(self, s, h):
 
         # state CNN
-
-        # state CNN
-        # batch, seq, channel, height, width = s.shape
-        # s = s.view(-1, channel, height, width)
+        batch, seq, channel, height, width = s.shape
+        s = s.view(-1, channel, height, width)
 
         # batch_seq, channel, height, width = s.shape
         s = self.cnn(s)
-        s = s.view(batch, -1, 3136)
-        s = self.pre_lstm(s)
-        s = s.contiguous()
+        s = s.view(batch, seq, 3136)
 
-        s, h = self.rnn(s, h)
+        # s, h = self.rnn(s, h)
+
         beta = self.fc_beta(s)
 
         return beta, h.detach()

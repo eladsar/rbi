@@ -15,7 +15,7 @@ from model import BehavioralNet, DuelNet
 from memory import ObservationsMemory, ObservationsBatchSampler
 from agent import Agent
 from environment import Env
-from preprocess import get_mc_value, get_td_value, release_file, lock_file, get_rho_is
+from preprocess import get_expected_value, _get_mc_value, release_file, lock_file, get_rho_is
 import cv2
 import os
 import time
@@ -386,7 +386,7 @@ class RBIAgent(Agent):
 
                 self.frame += 1
 
-            mc_val = get_mc_value(rewards, self.discount)
+            mc_val = _get_mc_value(rewards, None, self.discount, None)
             q_val = np.array(q_val)
 
             print("sts | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | nst: %s\t| n %d\t| avg_r: %g\t| avg_f: %g" %
@@ -547,7 +547,7 @@ class RBIAgent(Agent):
 
                     # cancel termination reward
                     rewards[i][-1][-1] -= self.termination_reward * int(env.k * self.skip >= self.max_length or env.score >= self.max_score)
-                    td_val = get_td_value(rewards[i], v_target[i], self.discount, self.n_steps)
+                    td_val = get_expected_value(rewards[i], v_target[i], self.discount, self.n_steps)
                     # rho_val = get_rho_is(rho[i], self.n_steps) if explore_threshold[i] >= 0 else np.ones(td_val.shape, dtype=np.float32)
                     rho_val = get_rho_is(rho[i], self.n_steps)
 
@@ -565,6 +565,7 @@ class RBIAgent(Agent):
                     env.reset()
                     episode[i] = []
                     rewards[i] = [[]]
+                    rho[i] = [[]]
                     v_target[i] = [[]]
                     lives[i] = env.lives
                     mp_trigger[i] = 0

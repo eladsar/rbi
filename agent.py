@@ -63,6 +63,7 @@ class Agent(object):
         self.hidden_state = args.hidden_features_rnn
         self.seq_length = args.seq_length
         self.burn_in = args.burn_in
+        self.seq_overlap = args.seq_overlap
 
     def save_checkpoint(self, path, aux=None):
         raise NotImplementedError

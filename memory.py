@@ -46,7 +46,7 @@ class ObservationsMemory(Memory):
         s = self.preprocess_history(episode_dir, sample['fr'])
 
         return {'s': s, 'r': sample['r'], 'rho': sample['rho'], 'a': sample['a'], 'pi': sample['pi'],
-                'aux': sample['aux'], 'h': sample['h']}
+                'aux': sample['aux']}
 
 
 class ObservationsBatchSampler(object):

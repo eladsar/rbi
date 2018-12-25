@@ -16,11 +16,12 @@ from model import BehavioralRNN, DuelRNN
 from memory_rnn import ObservationsRNNMemory, ObservationsRNNBatchSampler
 from agent import Agent
 from environment import Env
-from preprocess import get_mc_value, get_td_value, release_file, lock_file, get_rho_is
+from preprocess import get_expected_value, release_file, lock_file, get_rho_is
 import cv2
 import os
 import time
 import shutil
+
 
 imcompress = cv2.IMWRITE_PNG_COMPRESSION
 compress_level = 2
@@ -100,8 +101,8 @@ class RBIRNNAgent(Agent):
         # configure learning
 
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
-        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
-        self.optimizer_beta = torch.optim.Adam(self.beta_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
+        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.0001, eps=1e-3, weight_decay=0)
+        self.optimizer_beta = torch.optim.Adam(self.beta_net.parameters(), lr=0.0001, eps=1e-3, weight_decay=0)
 
         self.n_offset = 0
 
@@ -149,30 +150,34 @@ class RBIRNNAgent(Agent):
 
             s = sample['s'].to(self.device)
             a = sample['a'].to(self.device).unsqueeze_(2)
-            r = sample['r'].to(self.device)[:, self.burn_in:].contiguous()
-            rho = sample['rho'].to(self.device)[:, self.burn_in:, :].contiguous()
-            pi = sample['pi'].to(self.device)[:, self.burn_in:, :].contiguous()
-            h_adv = sample['h_adv'].to(self.device).unsqueeze_(0)
-            h_v = sample['h_v'].to(self.device).unsqueeze_(0)
-            h_beta = sample['h_beta'].to(self.device).unsqueeze_(0)
 
-            batch, seq, channel, height, width = s.shape
-            s = s.view(-1, channel, height, width)
-            s_bi, s = torch.split(s, [self.burn_in * batch, self.seq_length * batch], dim=0)
-            a_bi, a = torch.split(a, [self.burn_in, self.seq_length], dim=1)
+            # s_bi = sample['s_bi'].to(self.device)
+            # a_bi = sample['a_bi'].to(self.device).unsqueeze_(2)
+
+            r = sample['r'].to(self.device)
+            rho_q = sample['rho_q'].to(self.device)
+            rho_v = sample['rho_v'].to(self.device)
+            pi = sample['pi'].to(self.device)
+
             # burn in
 
-            beta, h_beta = self.beta_net(s_bi, h_beta, batch)
-            beta = F.softmax(beta.detach(), dim=1)
+            h_q = sample['h_q'].to(self.device).unsqueeze_(0)
+            h_beta = sample['h_beta'].to(self.device).unsqueeze_(0)
 
-            _, _, _, _, _, h_adv, h_v = self.value_net(s_bi, a_bi, beta, h_adv, h_v, batch)
+            # h_q = torch.zeros(1, self.batch, 512).to(self.device)
+            # h_beta = torch.zeros(1, self.batch, 512).to(self.device)
+
+            # beta, h_beta = self.beta_net(s_bi, h_beta)
+            # beta = F.softmax(beta.detach(), dim=2)
+            #
+            # _, _, _, _, _, h_q = self.value_net(s_bi, a_bi, beta, h_q)
 
             # Behavioral nets
-            beta, _ = self.beta_net(s, h_beta, batch)
-            beta_log = F.log_softmax(beta, dim=1)
+            beta, _ = self.beta_net(s, h_beta)
+            beta_log = F.log_softmax(beta, dim=2)
 
-            beta = F.softmax(beta.detach(), dim=1)
-            v, adv_eval, adv_a, _, q_a, _, _ = self.value_net(s, a, beta, h_adv, h_v, batch)
+            beta = F.softmax(beta.detach(), dim=2)
+            v, adv_eval, adv_a, _, q_a, _ = self.value_net(s, a, beta, h_q)
 
             v = v.squeeze(2)
             v_eval = v.detach()
@@ -187,12 +192,9 @@ class RBIRNNAgent(Agent):
             is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** self.priority_beta
             is_policy = is_policy / is_policy.mean()
 
-            rho = torch.clamp(rho, 0, 1)
-            rho_v, rho_q = rho[:, :, 0], rho[:, :, 1]
+            loss_value = ((v_eval * (1 - rho_v) + v * rho_v + adv_a - r) ** 2 * is_value * rho_q).sum() / (self.batch)
 
-            loss_value = ((v_eval * (1 - rho_v) + v * rho_v + adv_a - r) ** 2 * is_value * rho_q).mean()
-
-            loss_beta = ((-pi * beta_log).sum(dim=2) * is_policy).mean()
+            loss_beta = ((-pi * beta_log).sum(dim=2) * is_policy).sum() / (self.batch)
 
             # Learning part
 
@@ -221,7 +223,7 @@ class RBIRNNAgent(Agent):
                 Hpi = -(pi * pi_log).sum(dim=1)
                 Hbeta = -(beta_soft * beta_log[:, 0, :]).sum(dim=1)
 
-                adv_a = rho[:, 0, 0].data.cpu().numpy()[: self.batch_exploit]
+                adv_a = rho_v[:, 0].data.cpu().numpy()[: self.batch_exploit]
                 q_a = q_a[:, 0].data.cpu().numpy()[: self.batch_exploit]
                 r = r[:, 0].data.cpu().numpy()[: self.batch_exploit]
 
@@ -285,9 +287,9 @@ class RBIRNNAgent(Agent):
             for traj in os.listdir(trajectory_dir):
                 traj_num = int(traj.split(".")[0])
                 if traj_num < traj_min:
-                    traj_data = np.load(os.path.join(trajectory_dir, traj))
-                    for d in traj_data:
-                        episode_list.add(d['ep'])
+                    traj_data = pd.read_pickle(os.path.join(trajectory_dir, traj))
+                    for d in traj_data['ep']:
+                        episode_list.add(d)
                     os.remove(os.path.join(trajectory_dir, traj))
 
             for ep in episode_list:
@@ -332,11 +334,11 @@ class RBIRNNAgent(Agent):
                 aux = self.env.aux.to(self.device)
 
                 beta = self.beta_net(s, aux)
-                beta = F.softmax(beta.detach(), dim=1)
+                beta = F.softmax(beta.detach(), dim=2)
 
                 # take q as adv
 
-                v, adv, _, q, _, h_adv, h_v = self.value_net(s, self.a_zeros, beta, aux, h_adv, h_v)
+                v, adv, _, q, _, h_q = self.value_net(s, self.a_zeros, beta, aux, h_q)
 
                 q = q.squeeze(0).data.cpu().numpy()
                 v_expected = v.squeeze(0).data.cpu().numpy()
@@ -452,23 +454,13 @@ class RBIRNNAgent(Agent):
         release_file(fwrite)
 
         # Initial states
-        h_adv = torch.zeros(1, n_players, self.hidden_state).to(self.device)
-        h_v = torch.zeros(1, n_players, self.hidden_state).to(self.device)
+        h_q = torch.zeros(1, n_players, self.hidden_state).to(self.device)
         h_beta = torch.zeros(1, n_players, self.hidden_state).to(self.device)
-
-        # build burn-in sequence
-        # burnin = {"fr": 0, "a": 0, "r": np.zeros(1, dtype=np.float32)[0], "pi": np.zeros(self.action_space, dtype=np.float32),
-        #           "rho": np.zeros(2, dtype=np.float32), "h_beta": np.zeros(self.hidden_state, dtype=np.float32),
-        #           "h_adv": np.zeros(self.hidden_state, dtype=np.float32),
-        #           "h_v": np.zeros(self.hidden_state, dtype=np.float32), "ep": -1, "t": 1}
-        # burnin = [burnin] * self.burn_in
 
         for i in range(n_players):
             mp_env[i].reset()
             image_dir[i] = os.path.join(screen_dir[i], str(episode_num[i]))
             os.mkdir(image_dir[i])
-            # cv2.imwrite(os.path.join(image_dir[i], "%s.png" % str(-1)),
-            #             np.zeros((args.height, args.width), dtype=np.float32), [imcompress, compress_level])
 
         lives = [mp_env[i].lives for i in range(n_players)]
 
@@ -483,20 +475,17 @@ class RBIRNNAgent(Agent):
                 self.beta_net.eval()
                 self.value_net.eval()
 
-            s = torch.cat([env.s for env in mp_env]).to(self.device).unsqueeze(1)
-            batch, seq, channel, height, width = s.shape
-            s = s.view(-1, channel, height, width)
-
-            beta, h_beta = self.beta_net(s, h_beta, batch)
-            beta = F.softmax(beta.detach(), dim=1)
-            # take q as adv
-            v_expected, adv, _, q, _, h_adv, h_v = self.value_net(s, a_zeros_mp, beta, h_adv, h_v, batch)
-
-            # hidden state to np object
-
+            # save previous hidden state to np object
             h_beta_np = h_beta.squeeze(0).data.cpu().numpy()
-            h_adv_np = h_adv.squeeze(0).data.cpu().numpy()
-            h_v_np = h_v.squeeze(0).data.cpu().numpy()
+            h_q_np = h_q.squeeze(0).data.cpu().numpy()
+
+            s = torch.cat([env.s for env in mp_env]).to(self.device).unsqueeze(1)
+
+            beta, h_beta = self.beta_net(s, h_beta)
+            beta = F.softmax(beta.detach(), dim=2)
+            # take q as adv
+
+            v_expected, adv, _, q, _, h_q = self.value_net(s, a_zeros_mp, beta, h_q)
 
             q = q.squeeze(1).data.cpu().numpy()
             beta = beta.squeeze(1).data.cpu().numpy()
@@ -536,7 +525,6 @@ class RBIRNNAgent(Agent):
                 qmax = np.repeat(np.max(q, axis=1, keepdims=True), self.action_space, axis=1)
 
                 soft_rand = self.temp_soft ** ((q - qmin) / (qmax - qmin))
-                # soft_rand = self.temp_soft ** (0 * (q - qmin) / (qmax - qmin))
 
                 soft_reg = pi / (
                             np.repeat(np.sum(soft_rand, axis=1, keepdims=True), self.action_space, axis=1) - soft_rand)
@@ -559,9 +547,13 @@ class RBIRNNAgent(Agent):
 
                 env = mp_env[i]
                 cv2.imwrite(os.path.join(image_dir[i], "%s.png" % str(self.frame)), mp_env[i].image, [imcompress, compress_level])
-                episode[i].append({"fr": self.frame, "a": a, "r": 0, "pi": pi[i], "rho": 0,
-                                   "h_beta": h_beta_np[i], "h_adv": h_adv_np[i], "h_v": h_v_np[i],
-                                   "ep": episode_num[i], "t": 0, 'fr_s': fr_s[i], 'fr_e': 0})
+
+                h_beta_save = h_beta_np[i] if not self.frame % self.seq_overlap else None
+                h_q_save = h_q_np[i] if not self.frame % self.seq_overlap else None
+
+                episode[i].append({"fr": self.frame, "a": a, "pi": pi[i],
+                                   "h_beta": h_beta_save, "h_q": h_q_save,
+                                   "ep": episode_num[i], "t": 0, 'fr_s': fr_s[i]})
 
                 env.step(a)
 
@@ -573,28 +565,29 @@ class RBIRNNAgent(Agent):
 
                 rewards[i][-1].append(env.r)
                 v_target[i][-1].append(v_expected[i])
-                rho[i][-1].append(np.clip(pi[i][a] / pi_mix[i][a], 1e-5, self.clip_rho))
+                rho[i][-1].append(np.clip(pi[i][a] / pi_mix[i][a], 1e-5, self.clip_rho).astype(np.float32))
 
                 if env.t:
 
                     # cancel termination reward
                     rewards[i][-1][-1] -= self.termination_reward * int(env.k * self.skip >= self.max_length or env.score >= self.max_score)
-                    td_val = get_td_value(rewards[i], v_target[i], self.discount, self.n_steps)
+                    td_val = get_expected_value(rewards[i], v_target[i], self.discount, self.n_steps)
                     rho_val = get_rho_is(rho[i], self.n_steps)
 
                     rho_vec = np.concatenate(rho[i])
-                    for j, record in enumerate(episode[i]):
-                        record['r'] = td_val[j]
-                        record['rho'] = np.array([rho_vec[j], rho_val[j]], dtype=np.float32)
-                        record['fr_e'] = self.frame + 1
 
-                    # trajectory[i] += (burnin + episode[i][self.history_length-1:(min(self.max_length, len(episode[i])) - self.seq_length)])
-                    trajectory[i] += episode[i][self.history_length - 1:(min(self.max_length, len(episode[i])) - self.seq_length)]
+                    episode_df = pd.DataFrame(episode[i][self.history_length - 1:self.max_length])
+
+                    episode_df['r'] = td_val[self.history_length - 1:self.max_length]
+                    episode_df['rho_v'] = np.clip(rho_vec, 0, 1)[self.history_length - 1:self.max_length]
+                    episode_df['rho_q'] = np.clip(rho_val, 0, 1)[self.history_length - 1:self.max_length]
+                    episode_df['fr_e'] = episode_df.iloc[-1]['fr'] + 1
+
+                    trajectory[i].append(episode_df)
 
                     # reset hidden states
-                    h_v[:, i, :].zero_()
+                    h_q[:, i, :].zero_()
                     h_beta[:, i, :].zero_()
-                    h_adv[:, i, :].zero_()
 
                     print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
                           (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), mp_trigger[i], time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
@@ -602,6 +595,7 @@ class RBIRNNAgent(Agent):
                     env.reset()
                     episode[i] = []
                     rewards[i] = [[]]
+                    rho[i] = [[]]
                     v_target[i] = [[]]
                     lives[i] = env.lives
                     mp_trigger[i] = 0
@@ -619,10 +613,8 @@ class RBIRNNAgent(Agent):
 
                     image_dir[i] = os.path.join(screen_dir[i], str(episode_num[i]))
                     os.mkdir(image_dir[i])
-                    # cv2.imwrite(os.path.join(image_dir[i], "%s.png" % str(-1)),
-                    #             np.zeros((args.height, args.width), dtype=np.float32), [imcompress, compress_level])
 
-                    if len(trajectory[i]) >= self.player_replay_size:
+                    if sum([len(j) for j in trajectory[i]]) >= self.player_replay_size:
 
                         # write if enough space is available
                         if psutil.virtual_memory().available >= mem_threshold:
@@ -635,19 +627,17 @@ class RBIRNNAgent(Agent):
                             # unlock file
                             release_file(fwrite)
 
-                            traj_to_save = trajectory[i]
+                            traj_to_save = pd.concat(trajectory[i])
+                            traj_to_save['traj'] = traj_num
 
-                            for j in range(len(traj_to_save)):
-                                traj_to_save[j]['traj'] = traj_num
-
-                            traj_file = os.path.join(trajectory_dir[i], "%d.npy" % traj_num)
-
-                            np.save(traj_file, traj_to_save)
+                            traj_file = os.path.join(trajectory_dir[i], "%d.pkl" % traj_num)
+                            traj_to_save.to_pickle(traj_file)
 
                             fread = lock_file(readlock[i])
                             traj_list = np.load(fread)
                             fread.seek(0)
                             np.save(fread, np.append(traj_list, traj_num))
+
                             release_file(fread)
 
                         trajectory[i] = []
@@ -726,7 +716,7 @@ class RBIRNNAgent(Agent):
 
                 beta = self.beta_net(s, aux)
 
-                beta_softmax = F.softmax(beta, dim=1)
+                beta_softmax = F.softmax(beta, dim=2)
 
                 v, adv, _, q, _ = self.value_net(s, self.a_zeros, beta_softmax, aux)
                 v = v.squeeze(0)
@@ -734,7 +724,7 @@ class RBIRNNAgent(Agent):
                 q = q.squeeze(0).data.cpu().numpy()
 
                 beta = beta.squeeze(0)
-                beta = F.softmax(beta, dim=0)
+                beta = F.softmax(beta, dim=2)
                 beta = beta.data.cpu().numpy()
 
 
