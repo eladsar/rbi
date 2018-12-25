@@ -21,7 +21,7 @@ def boolean_feature(feature, default, help):
 # strings
 parser.add_argument('--game', type=str, default='nogame', help='ATARI game')
 parser.add_argument('--identifier', type=str, default='debug', help='The name of the model to use')
-parser.add_argument('--algorithm', type=str, default='rbi', help='[rbi|ppo|ape]')
+parser.add_argument('--algorithm', type=str, default='rbi', help='[rbi|ppo|ape|rbi_rnn]')
 
 if "gpu" in socket.gethostname():
     parser.add_argument('--indir', type=str, default='/dev/shm/sarafie/rbi/', help='Demonstration directory')
@@ -237,6 +237,10 @@ class Consts(object):
                         "kangaroo":     100,
     }
 
+    rec_type = np.dtype([('fr', np.int), ('a', np.int), ('pi', np.float32, len(np.nonzero(actions[args.game])[0])),
+                         ('h_beta', np.float32, args.hidden_features_rnn), ('h_q', np.float32, args.hidden_features_rnn),
+                         ('ep', np.int), ('t', np.float32), ('fr_s', np.int), ('fr_e', np.int),
+                         ('r', np.float32), ('rho_v', np.float32), ('rho_q', np.float32), ('traj', np.int)])
 
 consts = Consts()
 

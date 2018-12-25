@@ -15,7 +15,7 @@ from model import DQN
 from memory import DQNMemory, DQNBatchSampler
 from agent import Agent
 from environment import Env
-from preprocess import get_tde_value, lock_file, release_file, h_torch, hinv_torch, get_mc_value
+from preprocess import get_tde_value, lock_file, release_file, h_torch, hinv_torch, _get_mc_value
 import cv2
 import os
 import time
@@ -327,7 +327,7 @@ class ApeAgent(Agent):
 
             # tde_val, t_val = get_tde_value(rewards, self.discount, self.n_steps)
 
-            mc_val = get_mc_value(rewards, self.discount)
+            mc_val = _get_mc_value(rewards, None, self.discount, None)
             q_val = np.array(q_val)
 
             # print("mc_val: %d | q_val: %d" % (len(mc_val), len(q_val)))

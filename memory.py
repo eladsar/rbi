@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import os
 from config import consts, args
-from preprocess import get_mc_value, hinv_np, lock_file, release_file
+from preprocess import lock_file, release_file
 import itertools
 import cv2
 

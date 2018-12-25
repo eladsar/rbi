@@ -15,7 +15,7 @@ from model import BehavioralNet, ValueNet
 from memory import ObservationsMemory, ObservationsBatchSampler
 from agent import Agent
 from environment import Env
-from preprocess import get_mc_value, get_td_value, release_file, lock_file, get_gae_est
+from preprocess import _get_mc_value, get_expected_value, release_file, lock_file, get_gae_est
 import cv2
 import os
 import time
@@ -348,7 +348,7 @@ class PPOAgent(Agent):
 
                 self.frame += 1
 
-            mc_val = get_mc_value(rewards, self.discount)
+            mc_val = _get_mc_value(rewards, None, self.discount, None)
             q_val = np.array(q_val)
 
             print("sts | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | nst: %s\t| n %d\t| avg_r: %g\t| avg_f: %g" %
@@ -472,7 +472,7 @@ class PPOAgent(Agent):
 
                     # cancel termination reward
                     rewards[i][-1][-1] -= self.termination_reward * int(env.k * self.skip >= self.max_length or env.score >= self.max_score)
-                    td_val = get_td_value(rewards[i], v_target[i], self.discount, self.n_steps)
+                    td_val = get_expected_value(rewards[i], v_target[i], self.discount, self.n_steps)
                     rho_val = get_gae_est(rewards[i], v_target[i], self.discount)
 
                     rho_vec = np.concatenate(rho[i])

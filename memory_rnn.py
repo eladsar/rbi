@@ -3,11 +3,9 @@ import numpy as np
 import torch
 import os
 from config import consts, args
-from preprocess import get_mc_value, hinv_np, lock_file, release_file
-import itertools
+from preprocess import lock_file, release_file
 import cv2
 import pandas as pd
-from logger import logger
 
 img_width = args.width
 img_height = args.height
@@ -55,94 +53,93 @@ class ObservationsRNNMemory(MemoryRNN):
         super(ObservationsRNNMemory, self).__init__()
         self.screen_dir = os.path.join(replay_dir, "explore", "screen")
 
-    # def __getitem__(self, samples):
-    #
-    #     # if the first episode is too short s.t. there is no hidden state sample, take the second episode
-    #     samples.reset_index(drop=True, inplace=True)
-    #
-    #     if (samples['fr_e'][0] - samples['fr'][0]) <= (self.burn_in + (-samples['fr'][0] % self.seq_overlap)):
-    #
-    #         # take the second episode
-    #         offset = samples['fr_e'][0] - samples['fr'][0]
-    #         start = offset + (-samples['fr'][offset] % self.seq_overlap)
-    #         samples = samples[start:start + self.burn_in + self.seq_length]
-    #
-    #     else:
-    #         # take the first episode
-    #         start = (-samples['fr'][0] % self.seq_overlap)
-    #         end = min(samples['fr_e'][0] - samples['fr'][0], (self.burn_in + self.seq_length) + start)
-    #         samples = samples[start:end]
-    #
-    #     samples.reset_index(drop=True, inplace=True)
-    #
-    #     prune_length = len(samples)
-    #     pad_l = min(self.seq_length + self.burn_in - prune_length, self.burn_in)
-    #     pad_r = self.seq_length + self.burn_in - (prune_length + pad_l)
-    #
-    #     episode_dir = os.path.join(self.screen_dir, str(samples['ep'][0]))
-    #     s = self.preprocess_trajectory(episode_dir, samples['fr'][0], prune_length)
-    #
-    #     r = samples['r'].values.astype(np.float32)
-    #     rho_v = np.stack(samples['rho_v'].values)
-    #     rho_q = np.stack(samples['rho_q'].values)
-    #     a = samples['a'].values
-    #     pi = np.stack(samples['pi'].values)
-    #
-    #     h_q = samples['h_q'].values[0] if not pad_l else np.zeros(self.hidden_features, dtype=np.float32)
-    #     h_beta = samples['h_beta'].values[0] if not pad_l else np.zeros(self.hidden_features, dtype=np.float32)
-    #
-    #     if h_q is None or h_beta is None:
-    #         logger.info("Log exception")
-    #         logger.info("episode: %d" % samples['ep'][0])
-    #         logger.info("frame %d" % samples['fr'][0])
-    #         logger.info("length %d" % prune_length)
-    #         logger.info("fr_e %d" % samples['fr_e'][0])
-    #
-    #
-    #     r = np.pad(r, [(pad_l, pad_r)], 'constant', constant_values=0)
-    #     rho_v = np.pad(rho_v, [(pad_l, pad_r)], 'constant', constant_values=0)
-    #     rho_q = np.pad(rho_q, [(pad_l, pad_r)], 'constant', constant_values=0)
-    #     a = np.pad(a, [(pad_l, pad_r)], 'constant', constant_values=0)
-    #     pi = np.pad(pi, [(pad_l, pad_r), (0, 0)], 'constant', constant_values=0)
-    #     s = np.pad(s, [(pad_l, pad_r), (0, 0), (0, 0), (0, 0)], 'constant', constant_values=0)
-    #
-    #     return {'s': s[self.burn_in:], 'r': r[self.burn_in:], 'rho_q': rho_q[self.burn_in:], 'rho_v': rho_v[self.burn_in:],
-    #             'a': a[self.burn_in:], 'pi': pi[self.burn_in:], 'h_q': h_q, 'h_beta': h_beta,
-    #             's_bi': s[:self.burn_in],
-    #             'a_bi': a[:self.burn_in]}
-
     def __getitem__(self, samples):
+
+        samples, indexes, len_replay_buffer = samples
+        cond = np.logical_and(samples >= 0, samples < len_replay_buffer)
+        samples = samples[cond]
 
         # if the first episode is too short s.t. there is no hidden state sample, take the second episode
 
-        # samples.reset_index(drop=True, inplace=True)
-        #
-        # episode_dir = os.path.join(self.screen_dir, str(samples['ep'][0]))
-        # s = self.preprocess_history(episode_dir, samples['fr'][0])
-        # s = np.expand_dims(s, axis=0)
-        #
-        # r = samples['r'].values.astype(np.float32)[0:1]
-        # rho_v = np.stack(samples['rho_v'].values)[0:1]
-        # rho_q = np.stack(samples['rho_q'].values)[0:1]
-        # a = samples['a'].values[0:1]
-        # pi = np.stack(samples['pi'].values)[0:1]
-        #
-        # h_q = np.zeros(self.hidden_features, dtype=np.float32)
-        # h_beta = np.zeros(self.hidden_features, dtype=np.float32)
+        if (samples['fr_e'][0] - samples['fr'][0]) <= (self.burn_in + (-samples['fr'][0] % self.seq_overlap)):
 
-        h_q = np.zeros(self.hidden_features, dtype=np.float32)
-        h_beta = np.zeros(self.hidden_features, dtype=np.float32)
+            # take the second episode
+            offset = samples['fr_e'][0] - samples['fr'][0]
+            start = offset + (-samples['fr'][offset] % self.seq_overlap)
+            samples = samples[start:start + self.burn_in + self.seq_length]
 
-        s = np.zeros((2,4,84,84), dtype=np.float32)
-        a = np.zeros(2, dtype=np.int)
-        r = np.zeros(2, dtype=np.float32)
-        rho_q = np.ones(2, dtype=np.float32)
-        rho_v = np.ones(2, dtype=np.float32)
-        pi = np.zeros((2, 5), dtype=np.float32)
+        else:
+            # take the first episode
+            start = (-samples['fr'][0] % self.seq_overlap)
+            end = min(samples['fr_e'][0] - samples['fr'][0], (self.burn_in + self.seq_length) + start)
+            samples = samples[start:end]
 
+        prune_length = len(samples)
+        pad_l = min(self.seq_length + self.burn_in - prune_length, self.burn_in)
+        pad_r = self.seq_length + self.burn_in - (prune_length + pad_l)
 
-        return {'s': s, 'r': r, 'rho_q': rho_q, 'rho_v': rho_v,
-                'a': a, 'pi': pi, 'h_q': h_q, 'h_beta': h_beta,}
+        episode_dir = os.path.join(self.screen_dir, str(samples['ep'][0]))
+        s = self.preprocess_trajectory(episode_dir, samples['fr'][0], prune_length)
+
+        r = samples['r'].values.astype(np.float32)
+        rho_v = np.stack(samples['rho_v'].values)
+        rho_q = np.stack(samples['rho_q'].values)
+        a = samples['a'].values
+        pi = np.stack(samples['pi'].values)
+
+        h_q = samples['h_q'].values[0] if not pad_l else np.zeros(self.hidden_features, dtype=np.float32)
+        h_beta = samples['h_beta'].values[0] if not pad_l else np.zeros(self.hidden_features, dtype=np.float32)
+
+        # if h_q is None or h_beta is None:
+        #     logger.info("Log exception")
+        #     logger.info("episode: %d" % samples['ep'][0])
+        #     logger.info("frame %d" % samples['fr'][0])
+        #     logger.info("length %d" % prune_length)
+        #     logger.info("fr_e %d" % samples['fr_e'][0])
+
+        r = np.pad(r, [(pad_l, pad_r)], 'constant', constant_values=0)
+        rho_v = np.pad(rho_v, [(pad_l, pad_r)], 'constant', constant_values=0)
+        rho_q = np.pad(rho_q, [(pad_l, pad_r)], 'constant', constant_values=0)
+        a = np.pad(a, [(pad_l, pad_r)], 'constant', constant_values=0)
+        pi = np.pad(pi, [(pad_l, pad_r), (0, 0)], 'constant', constant_values=0)
+        s = np.pad(s, [(pad_l, pad_r), (0, 0), (0, 0), (0, 0)], 'constant', constant_values=0)
+
+        return {'s': s[self.burn_in:], 'r': r[self.burn_in:], 'rho_q': rho_q[self.burn_in:], 'rho_v': rho_v[self.burn_in:],
+                'a': a[self.burn_in:], 'pi': pi[self.burn_in:], 'h_q': h_q, 'h_beta': h_beta,
+                's_bi': s[:self.burn_in],
+                'a_bi': a[:self.burn_in]}
+
+    # def __getitem__(self, samples):
+    #
+    #     # if the first episode is too short s.t. there is no hidden state sample, take the second episode
+    #
+    #     # samples.reset_index(drop=True, inplace=True)
+    #     #
+    #     # episode_dir = os.path.join(self.screen_dir, str(samples['ep'][0]))
+    #     # s = self.preprocess_history(episode_dir, samples['fr'][0])
+    #     # s = np.expand_dims(s, axis=0)
+    #     #
+    #     # r = samples['r'].values.astype(np.float32)[0:1]
+    #     # rho_v = np.stack(samples['rho_v'].values)[0:1]
+    #     # rho_q = np.stack(samples['rho_q'].values)[0:1]
+    #     # a = samples['a'].values[0:1]
+    #     # pi = np.stack(samples['pi'].values)[0:1]
+    #     #
+    #     # h_q = np.zeros(self.hidden_features, dtype=np.float32)
+    #     # h_beta = np.zeros(self.hidden_features, dtype=np.float32)
+    #
+    #     h_q = np.zeros(self.hidden_features, dtype=np.float32)
+    #     h_beta = np.zeros(self.hidden_features, dtype=np.float32)
+    #
+    #     s = np.zeros((2,4,84,84), dtype=np.float32)
+    #     a = np.zeros(2, dtype=np.int)
+    #     r = np.zeros(2, dtype=np.float32)
+    #     rho_q = np.ones(2, dtype=np.float32)
+    #     rho_v = np.ones(2, dtype=np.float32)
+    #     pi = np.zeros((2, 5), dtype=np.float32)
+    #
+    #     return {'s': s, 'r': r, 'rho_q': rho_q, 'rho_v': rho_v,
+    #             'a': a, 'pi': pi, 'h_q': h_q, 'h_beta': h_beta,}
 
 
 class ObservationsRNNBatchSampler(object):
@@ -159,11 +156,13 @@ class ObservationsRNNBatchSampler(object):
         self.replay_memory_size = args.replay_memory_size + args.replay_explore_size
         self.readlock = os.path.join(replay_dir, "list", "readlock_explore.npy")
 
+        self.rec_type = consts.rec_type
+
     def __iter__(self):
 
         traj_old = 0
-        # replay_buffer = np.array([])
-        replay_buffer = pd.DataFrame({})
+        replay_buffer = np.array([], dtype=self.rec_type)
+        # replay_buffer = pd.DataFrame({})
         total_seq_length = args.burn_in + args.seq_length + args.seq_overlap
         sequence = np.arange(total_seq_length)
 
@@ -180,26 +179,26 @@ class ObservationsRNNBatchSampler(object):
             if not len(traj_sorted):
                 continue
 
-            # replay = np.concatenate([np.load(os.path.join(self.trajectory_dir, "%d.npy" % traj)) for traj in traj_sorted], axis=0)
-            # replay_buffer = np.concatenate([replay_buffer, replay], axis=0)[-self.replay_memory_size:]
+            replay = np.concatenate([np.load(os.path.join(self.trajectory_dir, "%d.npy" % traj)) for traj in traj_sorted], axis=0)
+            replay_buffer = np.concatenate([replay_buffer, replay], axis=0)
 
-            replay = pd.concat(
-                [pd.read_pickle(os.path.join(self.trajectory_dir, "%d.pkl" % traj)) for traj in traj_sorted], axis=0)
+            # replay = pd.concat(
+            #     [pd.read_pickle(os.path.join(self.trajectory_dir, "%d.pkl" % traj)) for traj in traj_sorted], axis=0)
+            #
+            # replay_buffer = pd.concat([replay_buffer, replay], axis=0)
 
-            replay_buffer = pd.concat([replay_buffer, replay], axis=0)
-            replay_buffer.reset_index(drop=True, inplace=True)
-            if len(replay_buffer) >= self.replay_memory_size:
-                offset = replay_buffer.iloc[-self.replay_memory_size]['fr'] - replay_buffer.iloc[-self.replay_memory_size]['fr_s']
-            else:
-                offset = 0
-            replay_buffer = replay_buffer.iloc[-self.replay_memory_size - offset:]
-            replay_buffer.reset_index(drop=True, inplace=True)
+            # replay_buffer.reset_index(drop=True, inplace=True)
 
-            assert (replay_buffer.iloc[0]['fr'] == replay_buffer.iloc[0]['fr_s']), \
-                "Missmatch start offset %d, %d, %d" % (offset, replay_buffer.iloc[0]['fr'], replay_buffer.iloc[0]['fr_s'])
+            offset = replay_buffer[-self.replay_memory_size]['fr'] - replay_buffer[-self.replay_memory_size]['fr_s'] \
+                if len(replay_buffer) >= self.replay_memory_size else 0
 
-            assert (replay_buffer.iloc[-1]['fr'] + 1 == replay_buffer.iloc[-1]['fr_e']), \
-                "Missmatch end %d, %d" %  (replay_buffer.iloc[-1]['fr'], replay_buffer.iloc[-1]['fr_e'])
+            replay_buffer = replay_buffer[-self.replay_memory_size - offset:]
+
+            # assert (replay_buffer.iloc[0]['fr'] == replay_buffer.iloc[0]['fr_s']), \
+            #     "Missmatch start offset %d, %d, %d" % (offset, replay_buffer.iloc[0]['fr'], replay_buffer.iloc[0]['fr_s'])
+            #
+            # assert (replay_buffer.iloc[-1]['fr'] + 1 == replay_buffer.iloc[-1]['fr_e']), \
+            #     "Missmatch end %d, %d" %  (replay_buffer.iloc[-1]['fr'], replay_buffer.iloc[-1]['fr_e'])
 
             # save previous traj_old to file
             np.save(self.list_old_path, np.array([traj_old]))
@@ -218,16 +217,16 @@ class ObservationsRNNBatchSampler(object):
             for i in range(minibatches):
 
                 samples = np.expand_dims(shuffle_indexes[i * self.batch:(i + 1) * self.batch], axis=1) + sequence
-                cond = np.logical_and(samples >= 0, samples < len_replay_buffer)
+                # cond = np.logical_and(samples >= 0, samples < len_replay_buffer)
 
-                # yield replay_buffer[samples]
+                yield list(zip(replay_buffer[samples], samples, len_replay_buffer))
                 # yield [replay_buffer.iloc[samples[i][cond[i]]] for i in range(self.batch)]
                 # yield [replay_buffer.iloc[samples[i]].copy(deep=True) for i in range(self.batch)]
                 # yield [1 for i in range(self.batch)]
                 # yield replay_buffer.iloc[range(self.batch)]
                 # yield np.arange(self.batch)
 
-                yield map(lambda x: replay_buffer.iloc[samples[x][cond[x]]], range(self.batch))
+                # yield list(map(lambda x: replay_buffer.iloc[samples[x][cond[x]]], range(self.batch)))
 
     def __len__(self):
         return np.inf
