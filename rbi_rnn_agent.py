@@ -55,6 +55,8 @@ class RBIRNNAgent(Agent):
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
         self.a_zeros_batch = self.a_zeros.repeat(self.batch, 1)
 
+        self.rec_type = consts.rec_type
+
         if player:
 
             # play variables
@@ -280,7 +282,8 @@ class RBIRNNAgent(Agent):
             for traj in os.listdir(trajectory_dir):
                 traj_num = int(traj.split(".")[0])
                 if traj_num < traj_min:
-                    traj_data = pd.read_pickle(os.path.join(trajectory_dir, traj))
+                    traj_data = np.load(os.path.join(trajectory_dir, traj))
+                    # traj_data = pd.read_pickle(os.path.join(trajectory_dir, traj))
                     for d in traj_data['ep']:
                         episode_list.add(d)
                     os.remove(os.path.join(trajectory_dir, traj))
@@ -546,9 +549,14 @@ class RBIRNNAgent(Agent):
                 h_beta_save = h_beta_np[i] if not self.frame % self.seq_overlap else None
                 h_q_save = h_q_np[i] if not self.frame % self.seq_overlap else None
 
-                episode[i].append({"fr": self.frame, "a": a, "pi": pi[i],
-                                   "h_beta": h_beta_save, "h_q": h_q_save,
-                                   "ep": episode_num[i], "t": 0, 'fr_s': fr_s[i]})
+                episode[i].append(np.array((self.frame, a, pi[i],
+                                            h_beta_save, h_q_save,
+                                            episode_num[i], 0., fr_s[i], 0,
+                                            0., 1., 1., 0), dtype=self.rec_type))
+
+                # episode[i].append({"fr": self.frame, "a": a, "pi": pi[i],
+                #                    "h_beta": h_beta_save, "h_q": h_q_save,
+                #                    "ep": episode_num[i], "t": 0, 'fr_s': fr_s[i]})
 
                 env.step(a)
 
@@ -571,12 +579,15 @@ class RBIRNNAgent(Agent):
 
                     rho_vec = np.concatenate(rho[i])
 
-                    episode_df = pd.DataFrame(episode[i][self.history_length - 1:self.max_length])
+                    episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
+                    # episode_df = pd.DataFrame(episode[i][self.history_length - 1:self.max_length])
 
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
                     episode_df['rho_v'] = np.clip(rho_vec, 0, 1)[self.history_length - 1:self.max_length]
                     episode_df['rho_q'] = np.clip(rho_val, 0, 1)[self.history_length - 1:self.max_length]
-                    episode_df['fr_e'] = episode_df.iloc[-1]['fr'] + 1
+
+                    episode_df['fr_e'] = episode_df[-1]['fr'] + 1
+                    # episode_df['fr_e'] = episode_df.iloc[-1]['fr'] + 1
 
                     trajectory[i].append(episode_df)
 
@@ -622,11 +633,14 @@ class RBIRNNAgent(Agent):
                             # unlock file
                             release_file(fwrite)
 
-                            traj_to_save = pd.concat(trajectory[i])
+                            traj_to_save = np.concatenate(trajectory[i])
+                            # traj_to_save = pd.concat(trajectory[i])
                             traj_to_save['traj'] = traj_num
 
-                            traj_file = os.path.join(trajectory_dir[i], "%d.pkl" % traj_num)
-                            traj_to_save.to_pickle(traj_file)
+                            traj_file = os.path.join(trajectory_dir[i], "%d.npy" % traj_num)
+                            np.save(traj_file, traj_to_save)
+                            # traj_file = os.path.join(trajectory_dir[i], "%d.pkl" % traj_num)
+                            # traj_to_save.to_pickle(traj_file)
 
                             fread = lock_file(readlock[i])
                             traj_list = np.load(fread)

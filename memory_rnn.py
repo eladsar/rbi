@@ -56,7 +56,8 @@ class ObservationsRNNMemory(MemoryRNN):
     def __getitem__(self, samples):
 
         # if the first episode is too short s.t. there is no hidden state sample, take the second episode
-        samples.reset_index(drop=True, inplace=True)
+
+        # samples.reset_index(drop=True, inplace=True)
 
         if (samples['fr_e'][0] - samples['fr'][0]) <= (self.burn_in + (-samples['fr'][0] % self.seq_overlap)):
 
@@ -71,27 +72,34 @@ class ObservationsRNNMemory(MemoryRNN):
             end = min(samples['fr_e'][0] - samples['fr'][0], (self.burn_in + self.seq_length) + start)
             samples = samples[start:end]
 
-        samples.reset_index(drop=True, inplace=True)
+        # samples.reset_index(drop=True, inplace=True)
 
         prune_length = len(samples)
         pad_l = min(self.seq_length + self.burn_in - prune_length, self.burn_in)
         pad_r = self.seq_length + self.burn_in - (prune_length + pad_l)
 
-        try:
-            episode_dir = os.path.join(self.screen_dir, str(samples['ep'][0]))
-        except:
-            print("XXX")
+        episode_dir = os.path.join(self.screen_dir, str(samples['ep'][0]))
 
         s = self.preprocess_trajectory(episode_dir, samples['fr'][0], prune_length)
 
-        h_q = samples['h_q'].values[0] if not pad_l else np.zeros(self.hidden_features, dtype=np.float32)
-        h_beta = samples['h_beta'].values[0] if not pad_l else np.zeros(self.hidden_features, dtype=np.float32)
+        # h_q = samples['h_q'].values[0] if not pad_l else np.zeros(self.hidden_features, dtype=np.float32)
+        # h_beta = samples['h_beta'].values[0] if not pad_l else np.zeros(self.hidden_features, dtype=np.float32)
+        #
+        # r = np.pad(samples['r'].values, [(pad_l, pad_r)], 'constant', constant_values=0)
+        # rho_v = np.pad(samples['rho_v'].values, [(pad_l, pad_r)], 'constant', constant_values=0)
+        # rho_q = np.pad(samples['rho_q'].values, [(pad_l, pad_r)], 'constant', constant_values=0)
+        # a = np.pad(samples['a'].values, [(pad_l, pad_r)], 'constant', constant_values=0)
+        # pi = np.pad(np.stack(samples['pi'].values), [(pad_l, pad_r), (0, 0)], 'constant', constant_values=0)
+        # s = np.pad(s, [(pad_l, pad_r), (0, 0), (0, 0), (0, 0)], 'constant', constant_values=0)
 
-        r = np.pad(samples['r'].values, [(pad_l, pad_r)], 'constant', constant_values=0)
-        rho_v = np.pad(samples['rho_v'].values, [(pad_l, pad_r)], 'constant', constant_values=0)
-        rho_q = np.pad(samples['rho_q'].values, [(pad_l, pad_r)], 'constant', constant_values=0)
-        a = np.pad(samples['a'].values, [(pad_l, pad_r)], 'constant', constant_values=0)
-        pi = np.pad(np.stack(samples['pi'].values), [(pad_l, pad_r), (0, 0)], 'constant', constant_values=0)
+        h_q = samples['h_q'][0] if not pad_l else np.zeros(self.hidden_features, dtype=np.float32)
+        h_beta = samples['h_beta'][0] if not pad_l else np.zeros(self.hidden_features, dtype=np.float32)
+
+        r = np.pad(samples['r'], [(pad_l, pad_r)], 'constant', constant_values=0)
+        rho_v = np.pad(samples['rho_v'], [(pad_l, pad_r)], 'constant', constant_values=0)
+        rho_q = np.pad(samples['rho_q'], [(pad_l, pad_r)], 'constant', constant_values=0)
+        a = np.pad(samples['a'], [(pad_l, pad_r)], 'constant', constant_values=0)
+        pi = np.pad(np.stack(samples['pi']), [(pad_l, pad_r), (0, 0)], 'constant', constant_values=0)
         s = np.pad(s, [(pad_l, pad_r), (0, 0), (0, 0), (0, 0)], 'constant', constant_values=0)
 
         return {'s': s[self.burn_in:], 'r': r[self.burn_in:], 'rho_q': rho_q[self.burn_in:], 'rho_v': rho_v[self.burn_in:],
@@ -114,10 +122,15 @@ class ObservationsRNNBatchSampler(object):
         self.replay_memory_size = args.replay_memory_size + args.replay_explore_size
         self.readlock = os.path.join(replay_dir, "list", "readlock_explore.npy")
 
+        self.rec_type = consts.rec_type
+
     def __iter__(self):
 
         traj_old = 0
-        replay_buffer = pd.DataFrame({})
+
+        # replay_buffer = pd.DataFrame({})
+        replay_buffer = np.array([], dtype=self.rec_type)
+
         total_seq_length = args.burn_in + args.seq_length + args.seq_overlap
         sequence = np.arange(total_seq_length)
 
@@ -134,16 +147,25 @@ class ObservationsRNNBatchSampler(object):
             if not len(traj_sorted):
                 continue
 
-            replay = pd.concat(
-                [pd.read_pickle(os.path.join(self.trajectory_dir, "%d.pkl" % traj)) for traj in traj_sorted], axis=0)
-            replay_buffer = pd.concat([replay_buffer, replay], axis=0)
-            replay_buffer.reset_index(drop=True, inplace=True)
+            # replay = pd.concat(
+            #     [pd.read_pickle(os.path.join(self.trajectory_dir, "%d.pkl" % traj)) for traj in traj_sorted], axis=0)
+            # replay_buffer = pd.concat([replay_buffer, replay], axis=0)
+            # replay_buffer.reset_index(drop=True, inplace=True)
 
-            offset = replay_buffer.iloc[-self.replay_memory_size]['fr'] - replay_buffer.iloc[-self.replay_memory_size]['fr_s'] \
+            replay = np.concatenate(
+                [np.load(os.path.join(self.trajectory_dir, "%d.npy" % traj)) for traj in traj_sorted], axis=0)
+            replay_buffer = np.concatenate([replay_buffer, replay], axis=0)
+
+            # offset = replay_buffer.iloc[-self.replay_memory_size]['fr'] - replay_buffer.iloc[-self.replay_memory_size]['fr_s'] \
+            #     if len(replay_buffer) >= self.replay_memory_size else 0
+
+            offset = replay_buffer[-self.replay_memory_size]['fr'] - replay_buffer[-self.replay_memory_size]['fr_s'] \
                 if len(replay_buffer) >= self.replay_memory_size else 0
 
-            replay_buffer = replay_buffer.iloc[-self.replay_memory_size - offset:]
-            replay_buffer.reset_index(drop=True, inplace=True)
+            # replay_buffer = replay_buffer.iloc[-self.replay_memory_size - offset:]
+            # replay_buffer.reset_index(drop=True, inplace=True)
+
+            replay_buffer = replay_buffer[-self.replay_memory_size - offset:]
 
             # save previous traj_old to file
             np.save(self.list_old_path, np.array([traj_old]))
@@ -162,7 +184,8 @@ class ObservationsRNNBatchSampler(object):
             for i in range(minibatches):
 
                 samples = np.expand_dims(shuffle_indexes[i * self.batch:(i + 1) * self.batch], axis=1) + sequence
-                yield [replay_buffer.iloc[samples[i]] for i in range(self.batch)]
+                # yield [replay_buffer.iloc[samples[i]] for i in range(self.batch)]
+                yield replay_buffer[samples]
 
     def __len__(self):
         return np.inf

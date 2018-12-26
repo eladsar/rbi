@@ -70,9 +70,6 @@ parser.add_argument('--max-frame', type=int, default=50000, help='Episode Frame 
 parser.add_argument('--seq-length', type=int, default=30, help='Length of RNN sequence')
 parser.add_argument('--burn-in', type=int, default=10, help='Length of Burn-in RNN sequence')
 parser.add_argument('--seq-overlap', type=int, default=10, help='Overlap between two consecutive squences')
-# parser.add_argument('--seq-length', type=int, default=1, help='Length of RNN sequence')
-# parser.add_argument('--burn-in', type=int, default=1, help='Length of Burn-in RNN sequence')
-# parser.add_argument('--seq-overlap', type=int, default=10, help='Overlap between two consecutive squences')
 
 parser.add_argument('--history-length', type=int, default=4, metavar='T', help='Number of consecutive states processed')
 parser.add_argument('--hidden-features', type=int, default=256, metavar='N', help='Number of hidden features in (CNN output)')
@@ -236,6 +233,12 @@ class Consts(object):
                         "icehockey":     1,
                         "kangaroo":     100,
     }
+
+    rec_type = np.dtype([('fr', np.int), ('a', np.int), ('pi', np.float32, len(np.nonzero(actions[args.game])[0])),
+                             ('h_beta', np.float32, args.hidden_features_rnn), ('h_q', np.float32, args.hidden_features_rnn),
+                             ('ep', np.int), ('t', np.float32), ('fr_s', np.int), ('fr_e', np.int),
+                             ('r', np.float32), ('rho_v', np.float32), ('rho_q', np.float32), ('traj', np.int)])
+
 
 consts = Consts()
 
