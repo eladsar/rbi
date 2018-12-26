@@ -75,8 +75,8 @@ parser.add_argument('--seq-overlap', type=int, default=10, help='Overlap between
 # parser.add_argument('--seq-overlap', type=int, default=10, help='Overlap between two consecutive squences')
 
 parser.add_argument('--history-length', type=int, default=4, metavar='T', help='Number of consecutive states processed')
-parser.add_argument('--hidden-features', type=int, default=512, metavar='N', help='Number of hidden features in (CNN output)')
-parser.add_argument('--hidden-features-rnn', type=int, default=512, metavar='N', help='Number of hidden features in (RNN output)')
+parser.add_argument('--hidden-features', type=int, default=256, metavar='N', help='Number of hidden features in (CNN output)')
+parser.add_argument('--hidden-features-rnn', type=int, default=256, metavar='N', help='Number of hidden features in (RNN output)')
 parser.add_argument('--play-episodes-interval', type=int, default=16, metavar='N', help='Number of episodes between net updates')
 
 parser.add_argument('--clip', type=float, default=0, metavar='VALUE', help='Reward clipping (0 to disable)')
