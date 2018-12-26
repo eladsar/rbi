@@ -168,7 +168,7 @@ class Experiment(object):
             if not args.off_players:
                 hold = 0
 
-            if len(os.listdir(os.path.join(self.replay_dir, "explore", "trajectory"))) >= (int(5000. / args.player_replay_size * batch_explore) + 1):
+            if len(os.listdir(os.path.join(self.replay_dir, "explore", "trajectory"))) >= (int(500. / args.player_replay_size * batch_explore) + 1):
                 hold = 0
 
             time.sleep(5)

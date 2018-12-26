@@ -9,6 +9,7 @@ from torch.nn import functional as F
 from config import consts, args
 import psutil
 import socket
+import pandas as pd
 
 from model import BehavioralRNN, DuelRNN
 
@@ -53,8 +54,6 @@ class RBIRNNAgent(Agent):
 
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
         self.a_zeros_batch = self.a_zeros.repeat(self.batch, 1)
-
-        self.rec_type = consts.rec_type
 
         if player:
 
@@ -144,15 +143,13 @@ class RBIRNNAgent(Agent):
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
                    'a_player': [], 'loss_std': [], 'mc_val': [], "Hbeta": [], "Hpi": [], "adv_a": [], "q_a": []}
 
-        # tic = time.time()
-
         for n, sample in tqdm(enumerate(self.train_loader)):
 
             s = sample['s'].to(self.device)
             a = sample['a'].to(self.device).unsqueeze_(2)
 
-            # s_bi = sample['s_bi'].to(self.device)
-            # a_bi = sample['a_bi'].to(self.device).unsqueeze_(2)
+            s_bi = sample['s_bi'].to(self.device)
+            a_bi = sample['a_bi'].to(self.device).unsqueeze_(2)
 
             r = sample['r'].to(self.device)
             rho_q = sample['rho_q'].to(self.device)
@@ -164,13 +161,10 @@ class RBIRNNAgent(Agent):
             h_q = sample['h_q'].to(self.device).unsqueeze_(0)
             h_beta = sample['h_beta'].to(self.device).unsqueeze_(0)
 
-            # h_q = torch.zeros(1, self.batch, 512).to(self.device)
-            # h_beta = torch.zeros(1, self.batch, 512).to(self.device)
+            beta, h_beta = self.beta_net(s_bi, h_beta)
+            beta = F.softmax(beta.detach(), dim=2)
 
-            # beta, h_beta = self.beta_net(s_bi, h_beta)
-            # beta = F.softmax(beta.detach(), dim=2)
-            #
-            # _, _, _, _, _, h_q = self.value_net(s_bi, a_bi, beta, h_q)
+            _, _, _, _, _, h_q = self.value_net(s_bi, a_bi, beta, h_q)
 
             # Behavioral nets
             beta, _ = self.beta_net(s, h_beta)
@@ -192,9 +186,9 @@ class RBIRNNAgent(Agent):
             is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** self.priority_beta
             is_policy = is_policy / is_policy.mean()
 
-            loss_value = ((v_eval * (1 - rho_v) + v * rho_v + adv_a - r) ** 2 * is_value * rho_q).sum() / (self.batch)
+            loss_value = ((v_eval * (1 - rho_v) + v * rho_v + adv_a - r) ** 2 * is_value * rho_q).mean()
 
-            loss_beta = ((-pi * beta_log).sum(dim=2) * is_policy).sum() / (self.batch)
+            loss_beta = ((-pi * beta_log).sum(dim=2) * is_policy).mean()
 
             # Learning part
 
@@ -287,7 +281,7 @@ class RBIRNNAgent(Agent):
             for traj in os.listdir(trajectory_dir):
                 traj_num = int(traj.split(".")[0])
                 if traj_num < traj_min:
-                    traj_data = np.load(os.path.join(trajectory_dir, traj))
+                    traj_data = pd.read_pickle(os.path.join(trajectory_dir, traj))
                     for d in traj_data['ep']:
                         episode_list.add(d)
                     os.remove(os.path.join(trajectory_dir, traj))
@@ -551,10 +545,9 @@ class RBIRNNAgent(Agent):
                 h_beta_save = h_beta_np[i] if not self.frame % self.seq_overlap else None
                 h_q_save = h_q_np[i] if not self.frame % self.seq_overlap else None
 
-                episode[i].append(np.array((self.frame, a, pi[i],
-                                            h_beta_save, h_q_save,
-                                            episode_num[i], 0., fr_s[i], 0,
-                                            0., 1., 1., 0), dtype=self.rec_type))
+                episode[i].append({"fr": self.frame, "a": a, "pi": pi[i],
+                                   "h_beta": h_beta_save, "h_q": h_q_save,
+                                   "ep": episode_num[i], "t": 0, 'fr_s': fr_s[i]})
 
                 env.step(a)
 
@@ -577,12 +570,12 @@ class RBIRNNAgent(Agent):
 
                     rho_vec = np.concatenate(rho[i])
 
-                    episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
+                    episode_df = pd.DataFrame(episode[i][self.history_length - 1:self.max_length])
 
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
                     episode_df['rho_v'] = np.clip(rho_vec, 0, 1)[self.history_length - 1:self.max_length]
                     episode_df['rho_q'] = np.clip(rho_val, 0, 1)[self.history_length - 1:self.max_length]
-                    episode_df['fr_e'] = episode_df[-1]['fr'] + 1
+                    episode_df['fr_e'] = episode_df.iloc[-1]['fr'] + 1
 
                     trajectory[i].append(episode_df)
 
@@ -628,11 +621,11 @@ class RBIRNNAgent(Agent):
                             # unlock file
                             release_file(fwrite)
 
-                            traj_to_save = np.concatenate(trajectory[i])
+                            traj_to_save = pd.concat(trajectory[i])
                             traj_to_save['traj'] = traj_num
 
-                            traj_file = os.path.join(trajectory_dir[i], "%d.npy" % traj_num)
-                            np.save(traj_file, traj_to_save)
+                            traj_file = os.path.join(trajectory_dir[i], "%d.pkl" % traj_num)
+                            traj_to_save.to_pickle(traj_file)
 
                             fread = lock_file(readlock[i])
                             traj_list = np.load(fread)

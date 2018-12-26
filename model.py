@@ -255,16 +255,14 @@ class DuelRNN(nn.Module):
 
         # value net
         self.fc_v = nn.Sequential(
-            nn.Linear(3136, args.hidden_features),
-            # nn.Linear(args.hidden_features_rnn, args.hidden_features),
+            nn.Linear(args.hidden_features_rnn, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, 1),
         )
 
         # advantage net
         self.fc_adv = nn.Sequential(
-            nn.Linear(3136, args.hidden_features),
-            # nn.Linear(args.hidden_features_rnn, args.hidden_features),
+            nn.Linear(args.hidden_features_rnn, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, action_space),
         )
@@ -279,7 +277,7 @@ class DuelRNN(nn.Module):
             nn.ReLU(),
         )
 
-        # self.rnn = nn.GRU(3136, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
+        self.rnn = nn.GRU(3136, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
 
         # initialization
         self.cnn[0].bias.data.zero_()
@@ -297,7 +295,7 @@ class DuelRNN(nn.Module):
         s = self.cnn(s)
         s = s.view(batch, seq, 3136)
 
-        # s, h = self.rnn(s, h)
+        s, h = self.rnn(s, h)
 
         v = self.fc_v(s)
         adv_tilde = self.fc_adv(s)
@@ -308,7 +306,6 @@ class DuelRNN(nn.Module):
         adv_a = adv.gather(2, a).squeeze(2)
         q = v + adv
 
-        # q = hinv_torch(q)
         q_a = q.gather(2, a).squeeze(2)
 
         return v, adv, adv_a, q, q_a, h.detach()
@@ -333,10 +330,9 @@ class BehavioralRNN(nn.Module):
 
         self.rnn = nn.GRU(3136, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
 
-        # advantage net
+        # behavior net
         self.fc_beta = nn.Sequential(
-            nn.Linear(3136, args.hidden_features),
-            # nn.Linear(args.hidden_features_rnn, args.hidden_features),
+            nn.Linear(args.hidden_features_rnn, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, action_space),
         )
@@ -359,7 +355,7 @@ class BehavioralRNN(nn.Module):
         s = self.cnn(s)
         s = s.view(batch, seq, 3136)
 
-        # s, h = self.rnn(s, h)
+        s, h = self.rnn(s, h)
 
         beta = self.fc_beta(s)
 
