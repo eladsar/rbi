@@ -204,24 +204,23 @@ class RBIRNNAgent(Agent):
 
             if not (n + 1 + self.n_offset) % 50:
 
-                a_exploit = a[: self.batch_exploit, 0, :]
-                a_index_np = a_exploit[:, 0].data.cpu().numpy()
+                a_index_np = a.view(-1).data.cpu().numpy()
 
                 # avoid zero pi
-                pi = pi[:, 0, :].clamp(min=1e-4, max=1)
+                pi = pi.view(-1, self.action_space).clamp(min=1e-4, max=1)
                 pi /= pi.sum(dim=1).unsqueeze(1).repeat(1, self.action_space)
 
                 pi_log = pi.log()
-                beta_soft = F.softmax(beta[:, 0, :], dim=1).detach()
+                beta_soft = F.softmax(beta.view(-1, self.action_space), dim=1).detach()
 
                 Hpi = -(pi * pi_log).sum(dim=1)
-                Hbeta = -(beta_soft * beta_log[:, 0, :]).sum(dim=1)
+                Hbeta = -(beta_soft * beta_log.view(-1, self.action_space)).sum(dim=1)
 
-                adv_a = rho_v[:, 0].data.cpu().numpy()[: self.batch_exploit]
-                q_a = q_a[:, 0].data.cpu().numpy()[: self.batch_exploit]
-                r = r[:, 0].data.cpu().numpy()[: self.batch_exploit]
+                adv_a = rho_v.view(-1).data.cpu().numpy()
+                q_a = q_a.view(-1).data.cpu().numpy()
+                r = r.view(-1).data.cpu().numpy()
 
-                _, beta_index = beta_soft[:self.batch_exploit].data.cpu().max(1)
+                _, beta_index = beta_soft.data.cpu().max(1)
                 beta_index = beta_index.numpy()
                 act_diff = (a_index_np != beta_index).astype(np.int)
 
@@ -311,6 +310,10 @@ class RBIRNNAgent(Agent):
             self.beta_net.eval()
             self.value_net.eval()
 
+            # Initial states
+            h_q = torch.zeros(1, 1, self.hidden_state).to(self.device)
+            h_beta = torch.zeros(1, 1, self.hidden_state).to(self.device)
+
             while not self.env.t:
 
                 if load and not (self.states % self.load_memory_interval):
@@ -322,23 +325,21 @@ class RBIRNNAgent(Agent):
                     self.beta_net.eval()
                     self.value_net.eval()
 
-                s = self.env.s.to(self.device)
+                s = self.env.s.to(self.device).unsqueeze(0)
                 trigger = trigger or (self.env.score > self.behavioral_avg_score * self.explore_threshold)
-                # get aux data
-                aux = self.env.aux.to(self.device)
 
-                beta = self.beta_net(s, aux)
+                beta, h_beta = self.beta_net(s, h_beta)
                 beta = F.softmax(beta.detach(), dim=2)
 
                 # take q as adv
 
-                v, adv, _, q, _, h_q = self.value_net(s, self.a_zeros, beta, aux, h_q)
+                v, adv, _, q, _, h_q = self.value_net(s, self.a_zeros, beta, h_q)
 
-                q = q.squeeze(0).data.cpu().numpy()
-                v_expected = v.squeeze(0).data.cpu().numpy()
+                q = q.squeeze(0).squeeze(0).data.cpu().numpy()
+                v_expected = v.squeeze(0).squeeze(0).data.cpu().numpy()
 
-                beta = beta.squeeze(0).data.cpu().numpy()
-                adv = adv.squeeze(0).data.cpu().numpy()
+                beta = beta.squeeze(0).squeeze(0).data.cpu().numpy()
+                adv = adv.squeeze(0).squeeze(0).data.cpu().numpy()
 
                 if self.n_offset >= self.random_initialization:
 

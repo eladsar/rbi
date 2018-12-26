@@ -256,6 +256,7 @@ class DuelRNN(nn.Module):
         # value net
         self.fc_v = nn.Sequential(
             nn.Linear(args.hidden_features_rnn, args.hidden_features),
+            # nn.Linear(3136, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, 1),
         )
@@ -263,6 +264,7 @@ class DuelRNN(nn.Module):
         # advantage net
         self.fc_adv = nn.Sequential(
             nn.Linear(args.hidden_features_rnn, args.hidden_features),
+            # nn.Linear(3136, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, action_space),
         )
@@ -332,6 +334,7 @@ class BehavioralRNN(nn.Module):
 
         # behavior net
         self.fc_beta = nn.Sequential(
+            # nn.Linear(3136, args.hidden_features),
             nn.Linear(args.hidden_features_rnn, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, action_space),
