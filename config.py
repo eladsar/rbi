@@ -62,9 +62,12 @@ parser.add_argument('--wait', type=float, default=0, help='Sleep at start-time')
 parser.add_argument('--skip', type=int, default=4, help='Skip pattern')
 parser.add_argument('--height', type=int, default=84, help='Image Height')
 parser.add_argument('--width', type=int, default=84, help='Image width')
-parser.add_argument('--batch', type=int, default=32, help='Mini-Batch Size')
-parser.add_argument('--batch_explore', type=int, default=16, help='Mini-Batch Size for Exploitation')
-parser.add_argument('--batch_exploit', type=int, default=16, help='Mini-Batch Size for Exploration')
+# parser.add_argument('--batch', type=int, default=32, help='Mini-Batch Size')
+# parser.add_argument('--batch_explore', type=int, default=16, help='Mini-Batch Size for Exploitation')
+# parser.add_argument('--batch_exploit', type=int, default=16, help='Mini-Batch Size for Exploration')
+parser.add_argument('--batch', type=int, default=128, help='Mini-Batch Size')
+parser.add_argument('--batch_explore', type=int, default=64, help='Mini-Batch Size for Exploitation')
+parser.add_argument('--batch_exploit', type=int, default=64, help='Mini-Batch Size for Exploration')
 parser.add_argument('--max-frame', type=int, default=50000, help='Episode Frame Limit')
 
 parser.add_argument('--seq-length', type=int, default=30, help='Length of RNN sequence')
@@ -73,7 +76,7 @@ parser.add_argument('--seq-overlap', type=int, default=10, help='Overlap between
 
 parser.add_argument('--history-length', type=int, default=4, metavar='T', help='Number of consecutive states processed')
 parser.add_argument('--hidden-features', type=int, default=256, metavar='N', help='Number of hidden features in (CNN output)')
-parser.add_argument('--hidden-features-rnn', type=int, default=256, metavar='N', help='Number of hidden features in (RNN output)')
+parser.add_argument('--hidden-features-rnn', type=int, default=512, metavar='N', help='Number of hidden features in (RNN output)')
 parser.add_argument('--play-episodes-interval', type=int, default=16, metavar='N', help='Number of episodes between net updates')
 
 parser.add_argument('--clip', type=float, default=0, metavar='VALUE', help='Reward clipping (0 to disable)')
@@ -104,28 +107,29 @@ parser.add_argument('--cpu-workers', type=int, default=24, help='How many CPUs w
 parser.add_argument('--cuda-default', type=int, default=0, help='Default GPU')
 
 # train parameters
-parser.add_argument('--update-target-interval', type=int, default=2500, metavar='STEPS', help='Number of traning iterations between q-target updates')
-
 # my train parameters
-parser.add_argument('--n-tot', type=int, default=3125000, metavar='STEPS', help='Total number of training steps')
-parser.add_argument('--checkpoint-interval', type=int, default=1000, metavar='STEPS', help='Number of training steps between evaluations')
-parser.add_argument('--random-initialization', type=int, default=1000, metavar='STEPS', help='Number of training steps in random policy')
-parser.add_argument('--player-replay-size', type=int, default=2500, help='Player\'s replay memory size')
-parser.add_argument('--update-memory-interval', type=int, default=50, metavar='STEPS', help='Number of steps between memory updates')
-parser.add_argument('--load-memory-interval', type=int, default=150, metavar='STEPS', help='Number of steps between memory loads')
-parser.add_argument('--replay-updates-interval', type=int, default=500, metavar='STEPS', help='Number of training iterations between q-target updates')
-parser.add_argument('--replay-memory-size', type=int, default=1000000, help='Total replay exploit memory size')
-parser.add_argument('--replay-explore-size', type=int, default=1000000, help='Total replay explore memory size')
-
+# parser.add_argument('--update-target-interval', type=int, default=1000, metavar='STEPS', help='Number of traning iterations between q-target updates')
 # parser.add_argument('--n-tot', type=int, default=3125000, metavar='STEPS', help='Total number of training steps')
-# parser.add_argument('--checkpoint-interval', type=int, default=5000, metavar='STEPS', help='Number of training steps between evaluations')
-# parser.add_argument('--random-initialization', type=int, default=2500, metavar='STEPS', help='Number of training steps in random policy')
+# parser.add_argument('--checkpoint-interval', type=int, default=1000, metavar='STEPS', help='Number of training steps between evaluations')
+# parser.add_argument('--random-initialization', type=int, default=1000, metavar='STEPS', help='Number of training steps in random policy')
 # parser.add_argument('--player-replay-size', type=int, default=2500, help='Player\'s replay memory size')
-# parser.add_argument('--update-memory-interval', type=int, default=100, metavar='STEPS', help='Number of steps between memory updates')
-# parser.add_argument('--load-memory-interval', type=int, default=250, metavar='STEPS', help='Number of steps between memory loads')
-# parser.add_argument('--replay-updates-interval', type=int, default=5000, metavar='STEPS', help='Number of training iterations between q-target updates')
+# parser.add_argument('--update-memory-interval', type=int, default=50, metavar='STEPS', help='Number of steps between memory updates')
+# parser.add_argument('--load-memory-interval', type=int, default=150, metavar='STEPS', help='Number of steps between memory loads')
+# parser.add_argument('--replay-updates-interval', type=int, default=750, metavar='STEPS', help='Number of training iterations between q-target updates')
 # parser.add_argument('--replay-memory-size', type=int, default=1000000, help='Total replay exploit memory size')
 # parser.add_argument('--replay-explore-size', type=int, default=1000000, help='Total replay explore memory size')
+
+# train parameters
+parser.add_argument('--update-target-interval', type=int, default=2500, metavar='STEPS', help='Number of traning iterations between q-target updates')
+parser.add_argument('--n-tot', type=int, default=3125000, metavar='STEPS', help='Total number of training steps')
+parser.add_argument('--checkpoint-interval', type=int, default=5000, metavar='STEPS', help='Number of training steps between evaluations')
+parser.add_argument('--random-initialization', type=int, default=2500, metavar='STEPS', help='Number of training steps in random policy')
+parser.add_argument('--player-replay-size', type=int, default=2500, help='Player\'s replay memory size')
+parser.add_argument('--update-memory-interval', type=int, default=100, metavar='STEPS', help='Number of steps between memory updates')
+parser.add_argument('--load-memory-interval', type=int, default=250, metavar='STEPS', help='Number of steps between memory loads')
+parser.add_argument('--replay-updates-interval', type=int, default=5000, metavar='STEPS', help='Number of training iterations between q-target updates')
+parser.add_argument('--replay-memory-size', type=int, default=1000000, help='Total replay exploit memory size')
+parser.add_argument('--replay-explore-size', type=int, default=1000000, help='Total replay explore memory size')
 
 # actors parameters
 

@@ -113,6 +113,30 @@ else:
     hinv_np_tag = _idle
     hinv_torch_tag = _idle
 
+def _get_truncated_value(rewards, v_target, discount, n_steps):
+
+    if infinite_horizon:
+        rewards = [list(itertools.chain(*rewards))]
+
+    lives = len(rewards)
+
+    values = []
+    for life in range(lives):
+
+        if not len(rewards[life]):
+            continue
+        discounts = discount ** np.arange(n_steps)
+
+        r = np.array(rewards[life])
+        if clip > 0:
+            r = np.clip(r, -clip, clip)
+
+        r[-1] += termination_reward
+
+        val = np.correlate(r, discounts, mode="full")[n_steps - 1:]
+        values.append(val)
+
+    return np.concatenate(values).astype(np.float32)
 
 def _get_mc_value(rewards, v_target, discount, n_steps):
 
@@ -137,7 +161,7 @@ def _get_mc_value(rewards, v_target, discount, n_steps):
         for i in range(len(r)):
             val[i] = (r[i:] * discounts[:-i-1]).sum()
 
-        values.append(val)
+        values.append(h_np(val))
 
     return np.concatenate(values).astype(np.float32)
 
@@ -178,7 +202,7 @@ def _get_td_value(rewards, v_target, discount, n_steps):
 
     return np.concatenate(values).astype(np.float32)
 
-
+# get_expected_value = _get_truncated_value
 if args.td:
     get_expected_value = _get_td_value
 else:
