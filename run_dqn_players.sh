@@ -24,5 +24,5 @@ CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --algorithm=ape --identifier=
 CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --algorithm=ape --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=16 --actor-index=15 --n-steps=3 --clip=1 --no-reward-shape  &
 
 CUDA_VISIBLE_DEVICES=0, python main.py --clean --algorithm=ape --identifier=$identifier --resume=$resume --load-last-model --game=$game &
-CUDA_VISIBLE_DEVICES=3, python main.py --choose --algorithm=ape --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --play-episodes-interval=16 --wait=150 --epsilon-pre=0.00164 --epsilon-post=0.00164 --no-tensorboard &
-CUDA_VISIBLE_DEVICES=3, python main.py --choose --algorithm=ape --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --play-episodes-interval=16 --wait=300 --epsilon-pre=0.00164 --epsilon-post=0.00164 --no-tensorboard &
+CUDA_VISIBLE_DEVICES=3, python main.py --choose --algorithm=ape --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --play-episodes-interval=16 --wait=150 --epsilon-pre=0.00164 --epsilon-post=0.00164  &
+CUDA_VISIBLE_DEVICES=3, python main.py --choose --algorithm=ape --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --play-episodes-interval=16 --wait=300 --epsilon-pre=0.00164 --epsilon-post=0.00164  &

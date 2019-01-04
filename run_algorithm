@@ -11,4 +11,4 @@ sh run_256_players.sh spaceinvaders_n60 0 spaceinvaders
 
 
 
-
+CUDA_VISIBLE_DEVICES=0, python main.py --learn --identifier=qbert_dqn --game=qbert --algorithm=ape --n-steps=3

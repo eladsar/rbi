@@ -12,6 +12,7 @@ import time
 
 from config import consts, args
 from rbi_agent import RBIAgent
+# from ape_encoded_agent import ApeAgent
 from ape_agent import ApeAgent
 from ppo_agent import PPOAgent
 from rbi_rnn_agent import RBIRNNAgent
@@ -342,6 +343,8 @@ class Experiment(object):
             raise NotImplementedError
 
         time.sleep(args.wait)
+
+        print("Here")
 
         while True:
 

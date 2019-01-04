@@ -107,6 +107,11 @@ class ObservationsRNNMemory(MemoryRNN):
                 's_bi': s[:self.burn_in],
                 'a_bi': a[:self.burn_in]}
 
+        # return {'s': s[self.burn_in:], 'r': r[self.burn_in-self.n_steps:-self.n_steps], 'rho_q': rho_q[self.burn_in-self.n_steps:-self.n_steps], 'rho_v': rho_v[self.burn_in:],
+        #         'a': a[self.burn_in:], 'pi': pi[self.burn_in:], 'h_q': h_q, 'h_beta': h_beta,
+        #         's_bi': s[:self.burn_in],
+        #         'a_bi': a[:self.burn_in]}
+
 
 class ObservationsRNNBatchSampler(object):
 

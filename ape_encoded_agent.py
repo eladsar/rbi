@@ -10,7 +10,7 @@ import psutil
 
 from config import consts, args
 
-from model import DQN
+from model import InverseDynamics, StateEncoder, DQNTruncated
 
 from memory import DQNMemory, DQNBatchSampler
 from agent import Agent
@@ -20,6 +20,7 @@ import cv2
 import os
 import time
 import shutil
+import itertools
 
 imcompress = cv2.IMWRITE_PNG_COMPRESSION
 compress_level = 2
@@ -29,7 +30,7 @@ class ApeAgent(Agent):
 
     def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
 
-        print("Learning with Ape Agent")
+        print("Learning with Ape Encoded Agent")
         super(ApeAgent, self).__init__()
         self.checkpoint = checkpoint
         self.root_dir = root_dir
@@ -43,7 +44,9 @@ class ApeAgent(Agent):
 
         self.device = torch.device("cuda:%d" % self.cuda_id)
 
-        self.dqn_net = DQN().to(self.device)
+        self.dqn_net = DQNTruncated().to(self.device)
+        self.state_encoder = StateEncoder().to(self.device)
+        self.inverse_dynamics = InverseDynamics().to(self.device)
 
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
         self.a_zeros_batch = self.a_zeros.repeat(self.batch, 1)
@@ -94,12 +97,19 @@ class ApeAgent(Agent):
 
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
         self.optimizer = torch.optim.Adam(self.dqn_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
+        self.optimizer_state = torch.optim.Adam(itertools.chain(self.state_encoder.parameters(), self.inverse_dynamics.parameters()),
+                                                          lr=0.00025 / 4, eps=1.5e-4, weight_decay=0)
+
+        self.loss_dynamics = torch.nn.CrossEntropyLoss()
         self.n_offset = 0
 
     def save_checkpoint(self, path, aux=None):
 
         state = {'dqn_net': self.dqn_net.state_dict(),
                  'optimizer': self.optimizer.state_dict(),
+                 'optimizer_state': self.optimizer_state.state_dict(),
+                 'state_encoder': self.state_encoder.state_dict(),
+                 'inverse_dynamics': self.inverse_dynamics.state_dict(),
                  'aux': aux}
 
         torch.save(state, path)
@@ -108,7 +118,10 @@ class ApeAgent(Agent):
 
         state = torch.load(path, map_location="cuda:%d" % self.cuda_id)
         self.dqn_net.load_state_dict(state['dqn_net'])
+        self.state_encoder.load_state_dict(state['state_encoder'])
+        self.inverse_dynamics.load_state_dict(state['inverse_dynamics'])
         self.optimizer.load_state_dict(state['optimizer'])
+        self.optimizer_state.load_state_dict(state['optimizer_state'])
         self.n_offset = state['aux']['n']
 
         return state['aux']
@@ -120,8 +133,10 @@ class ApeAgent(Agent):
     def learn(self, n_interval, n_tot):
 
         self.dqn_net.train()
+        self.inverse_dynamics.train()
+        self.state_encoder.train()
 
-        target_net = DQN().to(self.device)
+        target_net = DQNTruncated().to(self.device)
         target_net.load_state_dict(self.dqn_net.state_dict())
         target_net.eval()
 
@@ -139,18 +154,20 @@ class ApeAgent(Agent):
             s_tag = sample['s_tag'].to(self.device)
             aux_tag = sample['aux_tag'].to(self.device)
 
-            self.dqn_net.eval()
-            _, _, _, q, q_a_eval = self.dqn_net(s, a, aux)
-            q_a_eval = q_a_eval.detach()
-            # v_eval = v_eval.detach()
-            _, _, _, q_tag_eval, _ = self.dqn_net(s_tag, self.a_zeros_batch, aux_tag)
-            q_tag_eval = q_tag_eval.detach()
-            self.dqn_net.train()
+            f = self.state_encoder(s, aux)
+            f_tag = self.state_encoder(s_tag, aux_tag)
 
-            _, _, _, q_tag_target, _ = target_net(s_tag, self.a_zeros_batch, aux_tag)
+            s = f.detach()
+            s_tag = f_tag.detach()
+
+            _, _, _, q_tag_target, _ = target_net(s_tag, self.a_zeros_batch)
             q_tag_target = q_tag_target.detach()
 
-            _, _, _, _, q_a = self.dqn_net(s, a, aux)
+            _, _, _, q_tag_eval, _ = self.dqn_net(s_tag, self.a_zeros_batch)
+            q_tag_eval = q_tag_eval.detach()
+
+            _, _, _, q, q_a = self.dqn_net(s, a)
+            q_a_eval = q_a.detach()
 
             a_tag = torch.argmax(q_tag_eval, dim=1).unsqueeze(1)
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(q_tag_target.gather(1, a_tag).squeeze(1)))
@@ -159,11 +176,20 @@ class ApeAgent(Agent):
             is_value = is_value / is_value.mean()
             loss_value = ((q_a - r) ** 2 * is_value).mean()
 
+            # dynamics loss
+
+            p_a = self.inverse_dynamics(f, f_tag)
+            loss_dynamics = self.loss_dynamics(p_a, a.squeeze(1))
+
             # Learning part
 
             self.optimizer.zero_grad()
             loss_value.backward()
             self.optimizer.step()
+
+            self.optimizer_state.zero_grad()
+            loss_dynamics.backward()
+            self.optimizer_state.step()
 
             # collect actions statistics
 
@@ -280,7 +306,8 @@ class ApeAgent(Agent):
                 # get aux data
                 aux = self.env.aux.to(self.device)
 
-                _, _, _, q, _ = self.dqn_net(s, self.a_zeros, aux)
+                s = self.state_encoder(s, aux)
+                _, _, _, q, _ = self.dqn_net(s, self.a_zeros)
 
                 q = q.squeeze(0).data.cpu().numpy()
 
@@ -389,7 +416,8 @@ class ApeAgent(Agent):
             aux = torch.cat([env.aux for env in mp_env]).to(self.device)
             aux_np = aux.cpu().numpy().astype(np.float32)
 
-            _, _, _, q, _ = self.dqn_net(s, a_zeros_mp, aux)
+            s = self.state_encoder(s, aux)
+            _, _, _, q, _ = self.dqn_net(s, a_zeros_mp)
 
             q = q.data.cpu().numpy()
 

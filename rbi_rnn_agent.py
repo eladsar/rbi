@@ -16,7 +16,7 @@ from model import BehavioralRNN, DuelRNN
 from memory_rnn import ObservationsRNNMemory, ObservationsRNNBatchSampler
 from agent import Agent
 from environment import Env
-from preprocess import get_expected_value, release_file, lock_file, get_rho_is, _get_mc_value
+from preprocess import get_expected_value, release_file, lock_file, get_rho_is, _get_mc_value, h_torch, hinv_torch
 import cv2
 import os
 import time
@@ -139,8 +139,12 @@ class RBIRNNAgent(Agent):
 
     def learn(self, n_interval, n_tot):
 
+        target_net = DuelRNN().to(self.device)
+        target_net.load_state_dict(self.value_net.state_dict())
+
         self.beta_net.train()
         self.value_net.train()
+        target_net.eval()
 
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
                    'a_player': [], 'loss_std': [], 'mc_val': [], "Hbeta": [], "Hpi": [], "adv_a": [], "q_a": []}
@@ -168,11 +172,23 @@ class RBIRNNAgent(Agent):
 
             _, _, _, _, _, h_q = self.value_net(s_bi, a_bi, beta, h_q)
 
+            # _, _, _, _, q_a_bi, h_q = target_net(s_bi, a_bi, beta, h_q)
+
             # Behavioral nets
             beta, _ = self.beta_net(s, h_beta)
             beta_log = F.log_softmax(beta, dim=2)
-
             beta = F.softmax(beta.detach(), dim=2)
+
+            v_target, _, _, _, _, _ = target_net(s, a, beta, h_q)
+
+            v_target = v_target.squeeze(2).detach()
+            r = h_torch(r[:, :-self.n_steps] + self.discount ** self.n_steps * hinv_torch(v_target[:, self.n_steps:]))
+
+
+            # r = h_torch((hinv_torch(torch.cat((q_a_bi[:, -self.n_steps:], q_a_target[:, :-self.n_steps]), dim=1)) - r) / (
+            #             self.discount ** self.n_steps))
+            # r.detach_()
+
             v, adv_eval, adv_a, _, q_a, _ = self.value_net(s, a, beta, h_q)
 
             v = v.squeeze(2)
@@ -180,7 +196,8 @@ class RBIRNNAgent(Agent):
             q_a_eval = q_a.detach()
             adv_eval = adv_eval.detach()
 
-            is_value = (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
+            is_value = (((r - q_a_eval[:, :-self.n_steps]).abs() + 0.01) / (v_eval[:, :-self.n_steps].abs() + 0.01)) ** self.priority_beta
+            # is_value = (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
             is_value = is_value / is_value.mean()
 
             beta_mix = (1 - self.entropy_loss) * beta + self.entropy_loss / self.action_space
@@ -188,7 +205,10 @@ class RBIRNNAgent(Agent):
             is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** self.priority_beta
             is_policy = is_policy / is_policy.mean()
 
-            loss_value = ((v_eval * (1 - rho_v) + v * rho_v + adv_a - r) ** 2 * is_value * rho_q).mean()
+            # loss_value = ((v_eval * (1 - rho_v) + v * rho_v + adv_a - r) ** 2 * is_value * rho_q).mean()
+            loss_value = ((v_eval[:, :-self.n_steps] * (1 - rho_v[:, :-self.n_steps])
+                           + v[:, :-self.n_steps] * rho_v[:, :-self.n_steps]
+                           + adv_a[:, :-self.n_steps] - r) ** 2 * is_value * rho_q[:, :-self.n_steps]).mean()
 
             loss_beta = ((-pi * beta_log).sum(dim=2) * is_policy).mean()
 
@@ -219,12 +239,18 @@ class RBIRNNAgent(Agent):
                 Hbeta = -(beta_soft * beta_log.view(-1, self.action_space)).sum(dim=1)
 
                 adv_a = rho_v.view(-1).data.cpu().numpy()
+                # r = r.view(-1).data.cpu().numpy()
+                r = torch.cat((r, q_a[:, -self.n_steps:]), dim=1).view(-1).data.cpu().numpy()
                 q_a = q_a.view(-1).data.cpu().numpy()
-                r = r.view(-1).data.cpu().numpy()
+
 
                 _, beta_index = beta_soft.data.cpu().max(1)
                 beta_index = beta_index.numpy()
                 act_diff = (a_index_np != beta_index).astype(np.int)
+
+                if not (n+1) % self.update_target_interval:
+                    # save agent state
+                    target_net.load_state_dict(self.value_net.state_dict())
 
                 # add results
 
