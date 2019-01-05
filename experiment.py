@@ -13,6 +13,7 @@ import time
 from config import consts, args
 from rbi_agent import RBIAgent
 # from ape_encoded_agent import ApeAgent
+from r2d2_agent import R2D2Agent
 from ape_agent import ApeAgent
 from ppo_agent import PPOAgent
 from rbi_rnn_agent import RBIRNNAgent
@@ -126,6 +127,8 @@ class Experiment(object):
             return ApeAgent
         elif args.algorithm == "ppo":
             return PPOAgent
+        elif args.algorithm == "r2d2":
+            return R2D2Agent
         else:
             return NotImplementedError
 
@@ -195,16 +198,16 @@ class Experiment(object):
                 self.writer.add_histogram("actions/agent", train_results['a_agent'], n + n_offset, 'doane')
                 self.writer.add_histogram("actions/a_player", train_results['a_player'], n + n_offset, 'doane')
 
-                if args.algorithm != "ape":
+                if hasattr(agent, "beta_net"):
                     for name, param in agent.beta_net.named_parameters():
                         self.writer.add_histogram("beta_net/%s" % name, param.clone().cpu().data.numpy(), n + n_offset,
                                                   'fd')
-
+                if hasattr(agent, "value_net"):
                     for name, param in agent.value_net.named_parameters():
                         self.writer.add_histogram("value_net/%s" % name, param.clone().cpu().data.numpy(), n + n_offset,
                                                   'fd')
 
-                else:
+                if hasattr(agent, "dqn_net"):
                     for name, param in agent.dqn_net.named_parameters():
                         self.writer.add_histogram("value_net/%s" % name, param.clone().cpu().data.numpy(), n + n_offset,
                                                   'fd')
@@ -313,13 +316,13 @@ class Experiment(object):
             self.comet = comet.Experiment(api_key=consts.api_key, project_name="rbi")
             self.comet.log_multiple_params(vars(args))
 
-        if args.algorithm == "rbi" or args.algorithm == "rbi_rnn":
+        if args.algorithm in ["rbi", "rbi_rnn"]:
             results = {'n': 0,
                        'statistics': {
                            'reroute': {'player': 'reroutetv', 'cmin': args.cmin, 'cmax': args.cmax, 'delta': args.delta, 'score': 0, 'high': 0, 'frames':1},
                            'behavioral': {'player': 'behavioral', 'cmin': None, 'cmax': None, 'delta': 0, 'score': 0, 'high': 0, 'frames':1}
                        }}
-        elif args.algorithm == "ape":
+        elif args.algorithm in ["ape", "r2d2"]:
             results = {'n': 0,
                        'statistics': {
                            'reroute': {'player': 'reroutetv', 'cmin': args.cmin, 'cmax': args.cmax, 'delta': args.delta, 'score': 0, 'high': 0, 'frames':1},

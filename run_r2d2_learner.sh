@@ -3,13 +3,14 @@
 identifier=$1
 game=$2
 resume=$3
+aux="${@:4}"
 
 if [ $resume != "new" ]; then
     args="--resume=$3 --load-last-model"
-    aux="${@:4}"
+    echo "Resume Experiment: $identifier $3"
 else
     args=""
-    aux="${@:3}"
+    echo "New Experiment"
 fi
 
 python main.py --learn --identifier=$identifier --game=$game $args $aux --algorithm=r2d2 \

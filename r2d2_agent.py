@@ -52,7 +52,7 @@ class R2D2Agent(Agent):
         self.pi_rand_bi = torch.ones(self.batch, self.burn_in, self.action_space, dtype=torch.float).to(self.device) / self.action_space
 
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
-        self.a_zeros_bi = torch.zeros(self.batch, self.burn_in, 1, dtype=torch.float).to(self.device)
+        self.a_zeros_bi = torch.zeros(self.batch, self.burn_in, 1, dtype=torch.long).to(self.device)
 
         self.rec_type = consts.rec_type
 
@@ -152,11 +152,11 @@ class R2D2Agent(Agent):
             q_target = q_target.detach().gather(2, a_tag).squeeze(2)
 
             r = h_torch(r + self.discount ** self.n_steps * hinv_torch(q_target[:, self.n_steps:]))
-            q_a_eval = q_a.detach()
+            q_a_eval = q_a[:, :-self.n_steps].detach()
 
             is_value = ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_alpha
             is_value = is_value / is_value.mean()
-            loss_value = ((q_a - r) ** 2 * is_value).mean()
+            loss_value = ((q_a[:, :-self.n_steps] - r) ** 2 * is_value).mean()
 
             # Learning part
 
@@ -173,7 +173,7 @@ class R2D2Agent(Agent):
                 q_a = q_a.view(-1).data.cpu().numpy()
                 r = r.view(-1).data.cpu().numpy()
 
-                _, beta_index = q.view(-1).data.cpu().max(1)
+                _, beta_index = q.view(-1, self.action_space).data.cpu().max(1)
                 beta_index = beta_index.numpy()
                 act_diff = (a_index_np != beta_index).astype(np.int)
 
