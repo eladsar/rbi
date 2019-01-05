@@ -364,9 +364,6 @@ class DuelRNN(nn.Module):
         self.cnn[2].bias.data.zero_()
         self.cnn[4].bias.data.zero_()
 
-        # self.rnn.bias_ih_l0.data[:args.hidden_features_rnn].fill_(0.5)
-        # self.rnn.bias_hh_l0.data[:args.hidden_features_rnn].fill_(0.5)
-
     def forward(self, s, a, beta, h):
 
         # state CNN
@@ -428,9 +425,6 @@ class BehavioralRNN(nn.Module):
         self.cnn[0].bias.data.zero_()
         self.cnn[2].bias.data.zero_()
         self.cnn[4].bias.data.zero_()
-
-        # self.rnn.bias_ih_l0.data[:args.hidden_features_rnn].fill_(0.5)
-        # self.rnn.bias_hh_l0.data[:args.hidden_features_rnn].fill_(0.5)
 
     def forward(self, s, h):
 

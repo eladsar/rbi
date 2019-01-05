@@ -48,8 +48,7 @@ class PPOAgent(Agent):
         self.value_net = ValueNet().to(self.device)
 
         self.pi_rand = np.ones(self.action_space) / self.action_space
-        self.pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(
-            self.batch_exploit + self.batch_explore, 1).to(self.device)
+        self.pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(self.batch, 1).to(self.device)
 
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
         self.a_zeros_batch = self.a_zeros.repeat(self.batch, 1)
@@ -182,8 +181,7 @@ class PPOAgent(Agent):
 
             if not (n + 1 + self.n_offset) % 50:
 
-                a_exploit = a[: self.batch_exploit]
-                a_index_np = a_exploit[:, 0].data.cpu().numpy()
+                a_index_np = a[:, 0].data.cpu().numpy()
 
                 # avoid zero pi
                 pi = pi.clamp(min=1e-4, max=1)
@@ -195,11 +193,11 @@ class PPOAgent(Agent):
                 Hpi = -(pi * pi_log).sum(dim=1)
                 Hbeta = -(beta_soft * beta_log).sum(dim=1)
 
-                adv_a = np.ones(self.batch_exploit)
-                q_a = np.ones(self.batch_exploit)
-                r = r.data.cpu().numpy()[: self.batch_exploit]
+                adv_a = np.ones(self.batch)
+                q_a = np.ones(self.batch)
+                r = r.data.cpu().numpy()
 
-                _, beta_index = beta_soft[:self.batch_exploit].data.cpu().max(1)
+                _, beta_index = beta_soft.data.cpu().max(1)
                 beta_index = beta_index.numpy()
                 act_diff = (a_index_np != beta_index).astype(np.int)
 
@@ -466,7 +464,7 @@ class PPOAgent(Agent):
 
                 rewards[i][-1].append(env.r)
                 v_target[i][-1].append(v_expected[i])
-                rho[i][-1].append(np.clip(pi[i][a] / pi_mix[i][a], 1e-5, self.clip_rho))
+                rho[i][-1].append(pi[i][a] / pi_mix[i][a])
 
                 if env.t:
 

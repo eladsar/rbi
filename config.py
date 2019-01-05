@@ -50,9 +50,8 @@ parser.add_argument('--n-steps', type=int, default=6, metavar='STEPS', help='Num
 boolean_feature("dropout", False, "Use Dropout layer")
 boolean_feature("reward-shape", True, "Shape reward with sign(r)*log(1+|r|)")
 boolean_feature("infinite-horizon", True, "Don't end episode in EOL")
-boolean_feature("off-players", True, "Add Off-Policy explorer players")
 boolean_feature("frame-limit", True, "Limit episode frames")
-boolean_feature("td", True, "Temporal Difference (or Monte-Carlo) learning")
+parser.add_argument('--target', type=str, default='tde', help='Target method [td|tde|mc]')
 
 # parameters
 parser.add_argument('--resume', type=int, default=-1, help='Resume experiment number, set -1 for last experiment')
@@ -62,12 +61,7 @@ parser.add_argument('--wait', type=float, default=0, help='Sleep at start-time')
 parser.add_argument('--skip', type=int, default=4, help='Skip pattern')
 parser.add_argument('--height', type=int, default=84, help='Image Height')
 parser.add_argument('--width', type=int, default=84, help='Image width')
-# parser.add_argument('--batch', type=int, default=32, help='Mini-Batch Size')
-# parser.add_argument('--batch_explore', type=int, default=16, help='Mini-Batch Size for Exploitation')
-# parser.add_argument('--batch_exploit', type=int, default=16, help='Mini-Batch Size for Exploration')
 parser.add_argument('--batch', type=int, default=128, help='Mini-Batch Size')
-parser.add_argument('--batch_explore', type=int, default=64, help='Mini-Batch Size for Exploitation')
-parser.add_argument('--batch_exploit', type=int, default=64, help='Mini-Batch Size for Exploration')
 parser.add_argument('--max-frame', type=int, default=50000, help='Episode Frame Limit')
 
 parser.add_argument('--seq-length', type=int, default=30, help='Length of RNN sequence')
@@ -75,12 +69,12 @@ parser.add_argument('--burn-in', type=int, default=10, help='Length of Burn-in R
 parser.add_argument('--seq-overlap', type=int, default=10, help='Overlap between two consecutive squences')
 
 parser.add_argument('--history-length', type=int, default=4, metavar='T', help='Number of consecutive states processed')
-parser.add_argument('--hidden-features', type=int, default=256, metavar='N', help='Number of hidden features in (CNN output)')
+parser.add_argument('--hidden-features', type=int, default=512, metavar='N', help='Number of hidden features in (CNN output)')
 parser.add_argument('--hidden-features-rnn', type=int, default=512, metavar='N', help='Number of hidden features in (RNN output)')
 parser.add_argument('--play-episodes-interval', type=int, default=16, metavar='N', help='Number of episodes between net updates')
 
 parser.add_argument('--clip', type=float, default=0, metavar='VALUE', help='Reward clipping (0 to disable)')
-parser.add_argument('--discount', type=float, default=0.997, metavar='γ', help='Discount factor')
+parser.add_argument('--discount', type=float, default=0.99, metavar='γ', help='Discount factor')
 parser.add_argument('--clip-rho', type=float, default=10, metavar='rho', help='clip Importance Sampling ratio')
 parser.add_argument('--termination-reward', type=float, default=0, help='Reward for terminal state')
 parser.add_argument('--friction-reward', type=float, default=0, help='Negative friction reward')
@@ -107,19 +101,6 @@ parser.add_argument('--cpu-workers', type=int, default=24, help='How many CPUs w
 parser.add_argument('--cuda-default', type=int, default=0, help='Default GPU')
 
 # train parameters
-# my train parameters
-# parser.add_argument('--update-target-interval', type=int, default=1000, metavar='STEPS', help='Number of traning iterations between q-target updates')
-# parser.add_argument('--n-tot', type=int, default=3125000, metavar='STEPS', help='Total number of training steps')
-# parser.add_argument('--checkpoint-interval', type=int, default=1000, metavar='STEPS', help='Number of training steps between evaluations')
-# parser.add_argument('--random-initialization', type=int, default=1000, metavar='STEPS', help='Number of training steps in random policy')
-# parser.add_argument('--player-replay-size', type=int, default=2500, help='Player\'s replay memory size')
-# parser.add_argument('--update-memory-interval', type=int, default=50, metavar='STEPS', help='Number of steps between memory updates')
-# parser.add_argument('--load-memory-interval', type=int, default=150, metavar='STEPS', help='Number of steps between memory loads')
-# parser.add_argument('--replay-updates-interval', type=int, default=750, metavar='STEPS', help='Number of training iterations between q-target updates')
-# parser.add_argument('--replay-memory-size', type=int, default=1000000, help='Total replay exploit memory size')
-# parser.add_argument('--replay-explore-size', type=int, default=1000000, help='Total replay explore memory size')
-
-# train parameters
 parser.add_argument('--update-target-interval', type=int, default=2500, metavar='STEPS', help='Number of traning iterations between q-target updates')
 parser.add_argument('--n-tot', type=int, default=3125000, metavar='STEPS', help='Total number of training steps')
 parser.add_argument('--checkpoint-interval', type=int, default=5000, metavar='STEPS', help='Number of training steps between evaluations')
@@ -128,11 +109,9 @@ parser.add_argument('--player-replay-size', type=int, default=2500, help='Player
 parser.add_argument('--update-memory-interval', type=int, default=100, metavar='STEPS', help='Number of steps between memory updates')
 parser.add_argument('--load-memory-interval', type=int, default=250, metavar='STEPS', help='Number of steps between memory loads')
 parser.add_argument('--replay-updates-interval', type=int, default=5000, metavar='STEPS', help='Number of training iterations between q-target updates')
-parser.add_argument('--replay-memory-size', type=int, default=1000000, help='Total replay exploit memory size')
-parser.add_argument('--replay-explore-size', type=int, default=1000000, help='Total replay explore memory size')
+parser.add_argument('--replay-memory-size', type=int, default=2000000, help='Total replay exploit memory size')
 
 # actors parameters
-
 parser.add_argument('--n-players', type=int, default=16, help='Number of parallel players for current actor')
 parser.add_argument('--actor-index', type=int, default=0, help='Index of current actor')
 parser.add_argument('--n-actors', type=int, default=1, help='Total number of parallel actors')

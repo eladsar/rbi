@@ -155,7 +155,7 @@ class ApeAgent(Agent):
             a_tag = torch.argmax(q_tag_eval, dim=1).unsqueeze(1)
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(q_tag_target.gather(1, a_tag).squeeze(1)))
 
-            is_value = ((r - q_a_eval).abs() + 0.001) ** self.priority_beta
+            is_value = ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_beta
             is_value = is_value / is_value.mean()
             loss_value = ((q_a - r) ** 2 * is_value).mean()
 

@@ -49,8 +49,7 @@ class RBIRNNAgent(Agent):
         self.value_net = DuelRNN().to(self.device)
 
         self.pi_rand = np.ones(self.action_space) / self.action_space
-        self.pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(
-            self.batch_exploit + self.batch_explore, 1).to(self.device)
+        self.pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(self.batch, 1).to(self.device)
 
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
         self.a_zeros_batch = self.a_zeros.repeat(self.batch, 1)
@@ -594,7 +593,7 @@ class RBIRNNAgent(Agent):
 
                 rewards[i][-1].append(env.r)
                 v_target[i][-1].append(v_expected[i])
-                rho[i][-1].append(np.clip(pi[i][a] / pi_mix[i][a], 1e-5, self.clip_rho).astype(np.float32))
+                rho[i][-1].append(pi[i][a] / pi_mix[i][a])
 
                 if env.t:
 

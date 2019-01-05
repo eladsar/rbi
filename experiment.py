@@ -157,17 +157,11 @@ class Experiment(object):
         learn = agent.learn(args.checkpoint_interval, args.n_tot)
         agent.save_checkpoint(agent.snapshot_path, {'n': agent.n_offset})
 
-        # batch_explore = args.batch if (args.algorithm == "ape") else args.batch_explore
         batch_explore = args.batch
-        batch_exploit = args.batch_exploit
 
         hold = 1
         while hold:
             print("wait for first samples")
-            # if args.algorithm == "ape" or len(os.listdir(os.path.join(self.replay_dir, "exploit", "trajectory"))) >= (int(5000. / args.player_replay_size * batch_exploit) + 1):
-
-            if not args.off_players:
-                hold = 0
 
             if len(os.listdir(os.path.join(self.replay_dir, "explore", "trajectory"))) >= (int(500. / args.player_replay_size * batch_explore) + 1):
                 hold = 0
