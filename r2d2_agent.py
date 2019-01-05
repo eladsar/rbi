@@ -335,9 +335,7 @@ class R2D2Agent(Agent):
         pi_rand_t = torch.ones(n_players, 1, self.action_space, dtype=torch.float).to(self.device) / self.action_space
 
         player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
-
         explore_threshold = player_i
-
         mp_explore = 0.4 ** (1 + 7 * (1 - player_i))
 
         mp_env = [Env() for _ in range(n_players)]
@@ -346,10 +344,8 @@ class R2D2Agent(Agent):
         a_zeros_mp = self.a_zeros.repeat(n_players, 1, 1)
         mp_pi_rand = np.repeat(np.expand_dims(self.pi_rand, axis=0), n_players, axis=0)
 
-        range_players = np.arange(n_players)
         rewards = [[[]] for _ in range(n_players)]
         v_target = [[[]] for _ in range(n_players)]
-        rho = [[[]] for _ in range(n_players)]
         episode = [[] for _ in range(n_players)]
         image_dir = ['' for _ in range(n_players)]
         trajectory = [[] for _ in range(n_players)]
@@ -357,7 +353,6 @@ class R2D2Agent(Agent):
         fr_s = [self.frame + self.history_length - 1 for _ in range(n_players)]
 
         trajectory_dir = [os.path.join(self.explore_dir, "trajectory")] * n_players
-
         readlock = [os.path.join(self.list_dir, "readlock_explore.npy")] * n_players
 
         # set initial episodes number
@@ -443,32 +438,20 @@ class R2D2Agent(Agent):
                 if lives[i] > env.lives:
                     rewards[i].append([])
                     v_target[i].append([])
-                    rho[i].append([])
                 lives[i] = env.lives
 
                 rewards[i][-1].append(env.r)
                 v_target[i][-1].append(v_expected[i])
-                rho[i][-1].append(np.clip(pi[i][a] / pi_mix[i][a], 1e-5, self.clip_rho).astype(np.float32))
 
                 if env.t:
 
                     # cancel termination reward
                     rewards[i][-1][-1] -= self.termination_reward * int(env.k * self.skip >= self.max_length or env.score >= self.max_score)
                     td_val = get_expected_value(rewards[i], v_target[i], self.discount, self.n_steps)
-                    rho_val = get_rho_is(rho[i], self.n_steps)
-
-                    rho_vec = np.concatenate(rho[i])
-
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
-                    # episode_df = pd.DataFrame(episode[i][self.history_length - 1:self.max_length])
 
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
-                    episode_df['rho_v'] = np.clip(rho_vec, 0, 1)[self.history_length - 1:self.max_length]
-                    episode_df['rho_q'] = np.clip(rho_val, 0, 1)[self.history_length - 1:self.max_length]
-
                     episode_df['fr_e'] = episode_df[-1]['fr'] + 1
-                    # episode_df['fr_e'] = episode_df.iloc[-1]['fr'] + 1
-
                     trajectory[i].append(episode_df)
 
                     # reset hidden states
@@ -480,7 +463,6 @@ class R2D2Agent(Agent):
                     env.reset()
                     episode[i] = []
                     rewards[i] = [[]]
-                    rho[i] = [[]]
                     v_target[i] = [[]]
                     lives[i] = env.lives
                     mp_trigger[i] = 0
@@ -513,13 +495,10 @@ class R2D2Agent(Agent):
                             release_file(fwrite)
 
                             traj_to_save = np.concatenate(trajectory[i])
-                            # traj_to_save = pd.concat(trajectory[i])
                             traj_to_save['traj'] = traj_num
 
                             traj_file = os.path.join(trajectory_dir[i], "%d.npy" % traj_num)
                             np.save(traj_file, traj_to_save)
-                            # traj_file = os.path.join(trajectory_dir[i], "%d.pkl" % traj_num)
-                            # traj_to_save.to_pickle(traj_file)
 
                             fread = lock_file(readlock[i])
                             traj_list = np.load(fread)
