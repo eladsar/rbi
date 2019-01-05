@@ -1,11 +1,11 @@
 import numpy as np
-
+import os
 from config import consts, args
-
+import torch
 
 class Agent(object):
 
-    def __init__(self):
+    def __init__(self, root_dir, checkpoint=None):
         self.model = None
         self.optimizer = None
         # parameters
@@ -60,6 +60,17 @@ class Agent(object):
         self.burn_in = args.burn_in
         self.seq_overlap = args.seq_overlap
 
+        self.checkpoint = checkpoint
+        self.root_dir = root_dir
+        self.best_player_dir = os.path.join(root_dir, "best")
+        self.snapshot_path = os.path.join(root_dir, "snapshot")
+        self.exploit_dir = os.path.join(root_dir, "exploit")
+        self.explore_dir = os.path.join(root_dir, "explore")
+        self.list_dir = os.path.join(root_dir, "list")
+        self.writelock = os.path.join(self.list_dir, "writelock.npy")
+        self.episodelock = os.path.join(self.list_dir, "episodelock.npy")
+        self.device = torch.device("cuda:%d" % self.cuda_id)
+
     def save_checkpoint(self, path, aux=None):
         raise NotImplementedError
 
@@ -77,4 +88,5 @@ class Agent(object):
         raise NotImplementedError
 
     def resume(self, model_path):
-        raise NotImplementedError
+        aux = self.load_checkpoint(model_path)
+        return aux

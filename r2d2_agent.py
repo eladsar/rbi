@@ -33,18 +33,7 @@ class R2D2Agent(Agent):
     def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
 
         print("Learning with RBIRNNAgent")
-        super(R2D2Agent, self).__init__()
-        self.checkpoint = checkpoint
-        self.root_dir = root_dir
-        self.best_player_dir = os.path.join(root_dir, "best")
-        self.snapshot_path = os.path.join(root_dir, "snapshot")
-        self.exploit_dir = os.path.join(root_dir, "exploit")
-        self.explore_dir = os.path.join(root_dir, "explore")
-        self.list_dir = os.path.join(root_dir, "list")
-        self.writelock = os.path.join(self.list_dir, "writelock.npy")
-        self.episodelock = os.path.join(self.list_dir, "episodelock.npy")
-
-        self.device = torch.device("cuda:%d" % self.cuda_id)
+        super(R2D2Agent, self).__init__(root_dir, checkpoint)
         self.value_net = DuelRNN().to(self.device)
 
         self.pi_rand = np.ones(self.action_space) / self.action_space
@@ -119,10 +108,6 @@ class R2D2Agent(Agent):
         self.n_offset = state['aux']['n']
         return state['aux']
 
-    def resume(self, model_path):
-        aux = self.load_checkpoint(model_path)
-        return aux
-
     def learn(self, n_interval, n_tot):
 
         target_net = DuelRNN().to(self.device)
@@ -168,12 +153,12 @@ class R2D2Agent(Agent):
 
             if not (n + 1 + self.n_offset) % 50:
 
-                a_index_np = a[:, :-self.n_steps, 0].view(-1).data.cpu().numpy()
+                a_index_np = a[:, :-self.n_steps, 0].contiguous().view(-1).data.cpu().numpy()
 
-                q_a = q_a[:, :-self.n_steps].view(-1).data.cpu().numpy()
+                q_a = q_a[:, :-self.n_steps].contiguous().view(-1).data.cpu().numpy()
                 r = r.view(-1).data.cpu().numpy()
 
-                _, beta_index = q[:, :-self.n_steps, :].view(-1, self.action_space).data.cpu().max(1)
+                _, beta_index = q[:, :-self.n_steps, :].contiguous().view(-1, self.action_space).data.cpu().max(1)
                 beta_index = beta_index.numpy()
                 act_diff = (a_index_np != beta_index).astype(np.int)
 
@@ -404,7 +389,7 @@ class R2D2Agent(Agent):
 
             if self.n_offset >= self.random_initialization:
 
-                pi = np.zeros(n_players, self.action_space)
+                pi = np.zeros((n_players, self.action_space))
                 pi[range(n_players), np.argmax(q, axis=1)] = 1
 
                 pi_mix = pi * (1 - exploration) + exploration * mp_pi_rand

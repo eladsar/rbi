@@ -21,4 +21,4 @@ python main.py --learn --identifier=$identifier --game=$game $args $aux --algori
 --epsilon-pre=0.00164 --epsilon-post=0.00164 --cpu-workers=24 \
 --update-target-interval=1000 --n-tot=3125000 --checkpoint-interval=1000 \
 --random-initialization=1000 --player-replay-size=2500 --update-memory-interval=50 \
---load-memory-interval=150 --replay-updates-interval=750 --replay-memory-size=2000000
+--load-memory-interval=150 --replay-updates-interval=1000 --replay-memory-size=2000000

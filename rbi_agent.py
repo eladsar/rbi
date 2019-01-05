@@ -31,18 +31,7 @@ class RBIAgent(Agent):
     def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
 
         print("Learning with RBIAgent")
-        super(RBIAgent, self).__init__()
-        self.checkpoint = checkpoint
-        self.root_dir = root_dir
-        self.best_player_dir = os.path.join(root_dir, "best")
-        self.snapshot_path = os.path.join(root_dir, "snapshot")
-        self.exploit_dir = os.path.join(root_dir, "exploit")
-        self.explore_dir = os.path.join(root_dir, "explore")
-        self.list_dir = os.path.join(root_dir, "list")
-        self.writelock = os.path.join(self.list_dir, "writelock.npy")
-        self.episodelock = os.path.join(self.list_dir, "episodelock.npy")
-
-        self.device = torch.device("cuda:%d" % self.cuda_id)
+        super(RBIAgent, self).__init__(root_dir, checkpoint)
 
         self.beta_net = BehavioralNet().to(self.device)
         self.value_net = DuelNet().to(self.device)
@@ -128,10 +117,6 @@ class RBIAgent(Agent):
             pass
 
         return state['aux']
-
-    def resume(self, model_path):
-        aux = self.load_checkpoint(model_path)
-        return aux
 
     def learn(self, n_interval, n_tot):
 
