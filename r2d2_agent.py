@@ -168,12 +168,12 @@ class R2D2Agent(Agent):
 
             if not (n + 1 + self.n_offset) % 50:
 
-                a_index_np = a.view(-1).data.cpu().numpy()
+                a_index_np = a[:, :-self.n_steps, 0].view(-1).data.cpu().numpy()
 
-                q_a = q_a.view(-1).data.cpu().numpy()
+                q_a = q_a[:, :-self.n_steps].view(-1).data.cpu().numpy()
                 r = r.view(-1).data.cpu().numpy()
 
-                _, beta_index = q.view(-1, self.action_space).data.cpu().max(1)
+                _, beta_index = q[:, :-self.n_steps, :].view(-1, self.action_space).data.cpu().max(1)
                 beta_index = beta_index.numpy()
                 act_diff = (a_index_np != beta_index).astype(np.int)
 

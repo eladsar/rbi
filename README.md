@@ -2,13 +2,14 @@
 Implementation of distributed RL algorithms:
 
 Baselines:
-1. Ape-X ()
-2. R2D2 ()
-3. PPO ()
+1. Ape-X (https://arxiv.org/abs/1803.00933)
+2. R2D2 (https://openreview.net/pdf?id=r1lyTjAqYX)
+3. PPO (https://arxiv.org/abs/1707.06347)
 
 RBI:
 A safe reinforcement learning algorithm 
 
+Currently, supported environment is ALE
 ## How to run
 
 ### Run Learner:
