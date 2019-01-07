@@ -6,12 +6,12 @@ game=$3
 
 args="--n-steps=5 --reward-shape --no-dropout --infinite-horizon --target=tde \
 --batch=32 --seq-length=30 --burn-in=10 --seq-overlap=10 \
---hidden-features=256 --hidden-features-rnn=256 --clip=0 --discount=0.997 \
---termination-reward=0 --friction-reward=0 --priority-alpha=0.5 --epsilon-a=0.001 \
+--hidden-features=512 --hidden-features-rnn=512 --clip=0 --discount=0.997 \
+--termination-reward=0 --friction-reward=0 --priority-alpha=0.9 --epsilon-a=0.001 \
 --epsilon-pre=0.00164 --epsilon-post=0.00164 --cpu-workers=24 \
---update-target-interval=1000 --n-tot=3125000 --checkpoint-interval=1000 \
---random-initialization=1000 --player-replay-size=2500 --update-memory-interval=50 \
---load-memory-interval=150 --replay-updates-interval=750 --replay-memory-size=2000000 \
+--update-target-interval=500 --n-tot=3125000 --checkpoint-interval=1000 \
+--random-initialization=1000 --player-replay-size=1000 --update-memory-interval=50 \
+--load-memory-interval=150 --replay-updates-interval=500 --replay-memory-size=2000000 \
 --n-players=16"
 
 CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --algorithm=r2d2 --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=16 --actor-index=0 $args  &

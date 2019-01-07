@@ -91,10 +91,11 @@ class ObservationsRNNMemory(MemoryRNN):
         a = np.pad(samples['a'], [(pad_l, pad_r)], 'constant', constant_values=0)
         pi = np.pad(np.stack(samples['pi']), [(pad_l, pad_r), (0, 0)], 'constant', constant_values=0)
         s = np.pad(s, [(pad_l, pad_r), (0, 0), (0, 0), (0, 0)], 'constant', constant_values=0)
+        t = np.pad(samples['t'], [(pad_l, pad_r)], 'constant', constant_values=1)
 
-        return {'s': s[self.burn_in:], 'r': r[-self.reward_length:], 'rho_q': rho_q[-self.reward_length:],
+        return {'s': s[self.burn_in:], 'r': r[-self.seq_length:-self.n_steps], 'rho_q': rho_q[-self.seq_length:-self.n_steps],
                 'rho_v': rho_v[self.burn_in:], 'a': a[self.burn_in:], 'pi': pi[self.burn_in:],
-                'h_q': h_q, 'h_beta': h_beta, 's_bi': s[:self.burn_in]}
+                'h_q': h_q, 'h_beta': h_beta, 's_bi': s[:self.burn_in], 't': t[self.burn_in:]}
 
 
 class ObservationsRNNBatchSampler(object):

@@ -125,23 +125,25 @@ class R2D2Agent(Agent):
             a = sample['a'].to(self.device).unsqueeze_(2)
             s_bi = sample['s_bi'].to(self.device)
             r = sample['r'].to(self.device)
+            t = sample['t'].to(self.device)
 
             # burn in
             h_q = sample['h_q'].to(self.device).unsqueeze_(0)
 
             _, _, _, _, _, h_q = self.value_net(s_bi, self.a_zeros_bi, self.pi_rand_bi, h_q)
-            _, _, _, q_target, _, _ = target_net(s, a, self.pi_rand_seq, h_q)
+
             _, _, _, q, q_a, _ = self.value_net(s, a, self.pi_rand_seq, h_q)
-
             a_tag = torch.argmax(q, dim=2).detach().unsqueeze(2)
-            q_target = q_target.detach().gather(2, a_tag).squeeze(2)
 
-            r = h_torch(r + self.discount ** self.n_steps * hinv_torch(q_target[:, self.n_steps:]))
+            _, _, _, _, q_target, _ = target_net(s, a_tag, self.pi_rand_seq, h_q)
+            q_target = q_target.detach()
+
+            r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
             q_a_eval = q_a[:, :-self.n_steps].detach()
 
-            is_value = ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_alpha
+            is_value = ((1 - t[:, :-self.n_steps]) * (r - q_a_eval).abs() + self.epsilon_a) ** self.priority_alpha
             is_value = is_value / is_value.mean()
-            loss_value = ((q_a[:, :-self.n_steps] - r) ** 2 * is_value).mean()
+            loss_value = ((q_a[:, :-self.n_steps] - r) ** 2 * is_value * (1 - t[:, :-self.n_steps])).mean()
 
             # Learning part
 
@@ -178,6 +180,10 @@ class R2D2Agent(Agent):
                 results['loss_value'].append(loss_value.data.cpu().numpy())
                 results['loss_std'].append(0)
                 results['n'].append(n)
+
+                if not (n+1) % self.update_target_interval:
+                    # save agent state
+                    target_net.load_state_dict(self.value_net.state_dict())
 
                 if not (n + 1 + self.n_offset) % self.update_memory_interval:
                     # save agent state
@@ -320,7 +326,7 @@ class R2D2Agent(Agent):
         pi_rand_t = torch.ones(n_players, 1, self.action_space, dtype=torch.float).to(self.device) / self.action_space
 
         player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
-        explore_threshold = player_i
+        explore_threshold = np.zeros(self.n_players)
         mp_explore = 0.4 ** (1 + 7 * (1 - player_i))
 
         mp_env = [Env() for _ in range(n_players)]
@@ -381,11 +387,12 @@ class R2D2Agent(Agent):
             q = q.squeeze(1).data.cpu().numpy()
             v_expected = v_expected.squeeze(1).squeeze(1).data.cpu().numpy()
 
-            mp_trigger = np.logical_and(
-                np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
-                explore_threshold >= 0)
+            # mp_trigger = np.logical_and(
+            #     np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
+            #     explore_threshold >= 0)
 
-            exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
+            # exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
+            exploration = np.repeat(np.expand_dims(mp_explore, axis=1), self.action_space, axis=1)
 
             if self.n_offset >= self.random_initialization:
 
@@ -443,14 +450,13 @@ class R2D2Agent(Agent):
                     h_q[:, i, :].zero_()
 
                     print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
-                          (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), mp_trigger[i], time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
+                          (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), 1, time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
 
                     env.reset()
                     episode[i] = []
                     rewards[i] = [[]]
                     v_target[i] = [[]]
                     lives[i] = env.lives
-                    mp_trigger[i] = 0
                     fr_s[i] = (self.frame + 1) + (self.history_length - 1)
 
                     # get new episode number
