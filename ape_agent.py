@@ -30,21 +30,9 @@ class ApeAgent(Agent):
     def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
 
         print("Learning with Ape Agent")
-        super(ApeAgent, self).__init__()
-        self.checkpoint = checkpoint
-        self.root_dir = root_dir
-        self.best_player_dir = os.path.join(root_dir, "best")
-        self.snapshot_path = os.path.join(root_dir, "snapshot")
-        self.exploit_dir = os.path.join(root_dir, "exploit")
-        self.explore_dir = os.path.join(root_dir, "explore")
-        self.list_dir = os.path.join(root_dir, "list")
-        self.writelock = os.path.join(self.list_dir, "writelock.npy")
-        self.episodelock = os.path.join(self.list_dir, "episodelock.npy")
-
-        self.device = torch.device("cuda:%d" % self.cuda_id)
+        super(ApeAgent, self).__init__(root_dir, checkpoint)
 
         self.dqn_net = DQN().to(self.device)
-        self.target_net = DQN().to(self.device)
 
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
         self.a_zeros_batch = self.a_zeros.repeat(self.batch, 1)
@@ -100,7 +88,6 @@ class ApeAgent(Agent):
     def save_checkpoint(self, path, aux=None):
 
         state = {'dqn_net': self.dqn_net.state_dict(),
-                 'target_net': self.target_net.state_dict(),
                  'optimizer': self.optimizer.state_dict(),
                  'aux': aux}
 
@@ -110,20 +97,18 @@ class ApeAgent(Agent):
 
         state = torch.load(path, map_location="cuda:%d" % self.cuda_id)
         self.dqn_net.load_state_dict(state['dqn_net'])
-        self.target_net.load_state_dict(state['target_net'])
         self.optimizer.load_state_dict(state['optimizer'])
         self.n_offset = state['aux']['n']
 
         return state['aux']
 
-    def resume(self, model_path):
-        aux = self.load_checkpoint(model_path)
-        return aux
-
     def learn(self, n_interval, n_tot):
 
         self.dqn_net.train()
-        self.target_net.eval()
+
+        target_net = DQN().to(self.device)
+        target_net.load_state_dict(self.dqn_net.state_dict())
+        target_net.eval()
 
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
                    'a_player': [], 'loss_std': [], 'mc_val': [], "Hbeta": [], "Hpi": [], "adv_a": [], "q_a": []}
@@ -147,7 +132,7 @@ class ApeAgent(Agent):
             q_tag_eval = q_tag_eval.detach()
             self.dqn_net.train()
 
-            _, _, _, q_tag_target, _ = self.target_net(s_tag, self.a_zeros_batch, aux_tag)
+            _, _, _, q_tag_target, _ = target_net(s_tag, self.a_zeros_batch, aux_tag)
             q_tag_target = q_tag_target.detach()
 
             _, _, _, _, q_a = self.dqn_net(s, a, aux)
@@ -155,11 +140,7 @@ class ApeAgent(Agent):
             a_tag = torch.argmax(q_tag_eval, dim=1).unsqueeze(1)
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(q_tag_target.gather(1, a_tag).squeeze(1)))
 
-            # is_value = (r - q_a_eval).abs()
-            # is_value = (is_value / is_value.mean()) ** self.priority_beta
-
-            # is_value = (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
-            is_value = ((r - q_a_eval).abs() + 0.001) ** self.priority_beta
+            is_value = ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_beta
             is_value = is_value / is_value.mean()
             loss_value = ((q_a - r) ** 2 * is_value).mean()
 
@@ -173,13 +154,12 @@ class ApeAgent(Agent):
 
             if not (n + 1) % 50:
 
-                a_exploit = a[: self.batch_exploit]
-                a_index_np = a_exploit[:, 0].data.cpu().numpy()
+                a_index_np = a.squeeze(1).data.cpu().numpy()
 
-                q_a = q_a.data.cpu().numpy()[: self.batch_exploit]
-                r = r.data.cpu().numpy()[: self.batch_exploit]
+                q_a = q_a.data.cpu().numpy()
+                r = r.data.cpu().numpy()
 
-                _, beta_index = q[:self.batch_exploit].data.cpu().max(1)
+                _, beta_index = q.data.cpu().max(1)
                 beta_index = beta_index.numpy()
                 act_diff = (a_index_np != beta_index).astype(np.int)
 
@@ -206,7 +186,7 @@ class ApeAgent(Agent):
 
                 if not (n+1) % self.update_target_interval:
                     # save agent state
-                    self.target_net.load_state_dict(self.dqn_net.state_dict())
+                    target_net.load_state_dict(self.dqn_net.state_dict())
 
                 if not (n+1) % n_interval:
                     results['act_diff'] = np.concatenate(results['act_diff'])
@@ -343,12 +323,6 @@ class ApeAgent(Agent):
     def multiplay(self):
 
         n_players = self.n_players
-        half_players = int(n_players / 2)
-
-        # player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * half_players, self.n_actors) / (
-        #             half_players - 1)
-        # explore_threshold = np.concatenate((np.zeros(half_players), 1 - player_i))
-        # mp_explore = np.concatenate((np.zeros(half_players), 0.1 ** (1 + player_i)))
 
         player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
         explore_threshold = np.zeros(self.n_players)
@@ -356,7 +330,6 @@ class ApeAgent(Agent):
 
         mp_env = [Env() for _ in range(n_players)]
         self.frame = 0
-        mp_trigger = np.zeros(n_players)
         episode_num = np.zeros(n_players, dtype=np.int)
         a_zeros_mp = self.a_zeros.repeat(n_players, 1)
         mp_pi_rand = np.repeat(np.expand_dims(self.pi_rand, axis=0), n_players, axis=0)
@@ -413,7 +386,6 @@ class ApeAgent(Agent):
             else:
                 pi = mp_pi_rand
 
-            # mp_trigger = np.logical_or(mp_trigger, (np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold))
             mp_trigger = np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold
             exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger + (1 - mp_trigger) * self.eps_pre, axis=1), self.action_space, axis=1)
             pi_mix = pi * (1 - exploration) + exploration * mp_pi_rand

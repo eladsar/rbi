@@ -173,45 +173,124 @@ class ValueNet(nn.Module):
         return v
 
 
-class DQN(nn.Module):
+class DQNTruncated(nn.Module):
 
-    def __init__(self, drop=True):
+    def __init__(self):
 
-        super(DQN, self).__init__()
+        super(DQNTruncated, self).__init__()
 
         # value net
         self.fc_v = nn.Sequential(
+            nn.Linear(512, 512),
+            nn.ReLU(),
             nn.Linear(512, 1),
         )
 
         # advantage net
         self.fc_adv = nn.Sequential(
+            nn.Linear(512, 512),
+            nn.ReLU(),
             nn.Linear(512, action_space),
         )
 
+    def forward(self, s, a):
+
+        # behavioral estimator
+        v = self.fc_v(s)
+        adv_tilde = self.fc_adv(s)
+
+        bias = adv_tilde.mean(1).unsqueeze(1)
+        bias = bias.repeat(1, action_space)
+
+        adv = adv_tilde - bias
+
+        adv_a = adv.gather(1, a).squeeze(1)
+        q = v.repeat(1, action_space) + adv
+        q_a = q.gather(1, a).squeeze(1)
+
+        return v, adv, adv_a, q, q_a
+
+class InverseDynamics(nn.Module):
+
+    def __init__(self):
+        super(InverseDynamics, self).__init__()
+
+        # advantage net
+        self.dynamics = nn.Sequential(
+            nn.Linear(1024, 256),
+            nn.ReLU(),
+            nn.Linear(256, action_space),
+        )
+
+    def forward(self, f, f_tag):
+        # state CNN
+        a = self.dynamics(torch.cat((f, f_tag), dim=-1))
+
+        return a
+
+
+class StateEncoder(nn.Module):
+
+    def __init__(self):
+
+        super(StateEncoder, self).__init__()
+
+        # advantage net
+        self.encoder = nn.Sequential(
+            nn.Linear(3136 + aux_features, 512),
+        )
+
         # batch normalization and dropout
-        self.cnn_conv1 = nn.Sequential(
+        self.cnn = nn.Sequential(
             nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
-            nn.ReLU()
-        )
-
-        self.cnn_conv2 = nn.Sequential(
+            nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU()
-        )
-
-        self.cnn_conv3 = nn.Sequential(
+            nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
             nn.ReLU(),
         )
 
-        self.fc_h_v = nn.Sequential(
+        # initialization
+        self.cnn[0].bias.data.zero_()
+        self.cnn[2].bias.data.zero_()
+        self.cnn[4].bias.data.zero_()
+
+    def forward(self, s, aux):
+
+        # state CNN
+        s = self.cnn(s)
+        s = torch.cat((s.view(s.size(0), -1), aux), dim=1)
+        f = self.encoder(s)
+
+        return f
+
+class DQN(nn.Module):
+
+    def __init__(self):
+
+        super(DQN, self).__init__()
+
+        # value net
+        self.fc_v = nn.Sequential(
             nn.Linear(3136 + aux_features, 512),
             nn.ReLU(),
+            nn.Linear(512, 1),
         )
 
-        self.fc_h_a = nn.Sequential(
+        # advantage net
+        self.fc_adv = nn.Sequential(
             nn.Linear(3136 + aux_features, 512),
+            nn.ReLU(),
+            nn.Linear(512, action_space),
+        )
+
+        # batch normalization and dropout
+        self.cnn = nn.Sequential(
+            nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
             nn.ReLU(),
         )
 
@@ -225,15 +304,11 @@ class DQN(nn.Module):
         # state CNN
 
         s = self.cnn(s)
-
         s = torch.cat((s.view(s.size(0), -1), aux), dim=1)
-        s_v = self.fc_h_v(s)
-        s_a = self.fc_h_a(s)
 
         # behavioral estimator
-        v = self.fc_v(s_v)
-
-        adv_tilde = self.fc_adv(s_a)
+        v = self.fc_v(s)
+        adv_tilde = self.fc_adv(s)
 
         bias = adv_tilde.mean(1).unsqueeze(1)
         bias = bias.repeat(1, action_space)
@@ -253,18 +328,20 @@ class DuelRNN(nn.Module):
 
         super(DuelRNN, self).__init__()
 
+        self.hidden_rnn = int(args.hidden_features_rnn / 2)
+
         # value net
         self.fc_v = nn.Sequential(
-            nn.Linear(args.hidden_features_rnn, args.hidden_features),
-            # nn.Linear(3136, args.hidden_features),
+            # nn.Linear(self.hidden_rnn, args.hidden_features),
+            nn.Linear(3136, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, 1),
         )
 
         # advantage net
         self.fc_adv = nn.Sequential(
-            nn.Linear(args.hidden_features_rnn, args.hidden_features),
-            # nn.Linear(3136, args.hidden_features),
+            # nn.Linear(self.hidden_rnn, args.hidden_features),
+            nn.Linear(3136, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, action_space),
         )
@@ -279,15 +356,13 @@ class DuelRNN(nn.Module):
             nn.ReLU(),
         )
 
-        self.rnn = nn.GRU(3136, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
+        # self.rnn = nn.GRU(3136, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
+        # self.rnn = nn.LSTM(3136, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
 
         # initialization
         self.cnn[0].bias.data.zero_()
         self.cnn[2].bias.data.zero_()
         self.cnn[4].bias.data.zero_()
-
-        # self.rnn.bias_ih_l0.data[:args.hidden_features_rnn].fill_(0.5)
-        # self.rnn.bias_hh_l0.data[:args.hidden_features_rnn].fill_(0.5)
 
     def forward(self, s, a, beta, h):
 
@@ -297,7 +372,11 @@ class DuelRNN(nn.Module):
         s = self.cnn(s)
         s = s.view(batch, seq, 3136)
 
-        s, h = self.rnn(s, h)
+        # h = h.view(1, batch, self.hidden_rnn, 2)
+        # s, h = self.rnn(s, (h[:,:,:,0].contiguous(), h[:,:,:,1].contiguous()))
+        # h = torch.cat(h, dim=2)
+        #
+        # # s, h = self.rnn(s, h)
 
         v = self.fc_v(s)
         adv_tilde = self.fc_adv(s)
@@ -315,11 +394,12 @@ class DuelRNN(nn.Module):
 
 class BehavioralRNN(nn.Module):
 
-    def __init__(self, drop=True):
+    def __init__(self):
 
         super(BehavioralRNN, self).__init__()
 
-        self.batch = args.batch
+        self.hidden_rnn = int(args.hidden_features_rnn / 2)
+
         # batch normalization and dropout
         self.cnn = nn.Sequential(
             nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
@@ -330,12 +410,13 @@ class BehavioralRNN(nn.Module):
             nn.ReLU(),
         )
 
-        self.rnn = nn.GRU(3136, args.hidden_features_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
+        # self.rnn = nn.LSTM(3136, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
+        # self.rnn = nn.GRU(3136, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
 
         # behavior net
         self.fc_beta = nn.Sequential(
-            # nn.Linear(3136, args.hidden_features),
-            nn.Linear(args.hidden_features_rnn, args.hidden_features),
+            nn.Linear(3136, args.hidden_features),
+            # nn.Linear(self.hidden_rnn, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, action_space),
         )
@@ -344,9 +425,6 @@ class BehavioralRNN(nn.Module):
         self.cnn[0].bias.data.zero_()
         self.cnn[2].bias.data.zero_()
         self.cnn[4].bias.data.zero_()
-
-        # self.rnn.bias_ih_l0.data[:args.hidden_features_rnn].fill_(0.5)
-        # self.rnn.bias_hh_l0.data[:args.hidden_features_rnn].fill_(0.5)
 
     def forward(self, s, h):
 
@@ -358,7 +436,11 @@ class BehavioralRNN(nn.Module):
         s = self.cnn(s)
         s = s.view(batch, seq, 3136)
 
-        s, h = self.rnn(s, h)
+        # h = h.view(1, batch, self.hidden_rnn, 2)
+        # s, h = self.rnn(s, (h[:,:,:,0].contiguous(), h[:,:,:,1].contiguous()))
+        # h = torch.cat(h, dim=2)
+        #
+        # # s, h = self.rnn(s, h)
 
         beta = self.fc_beta(s)
 

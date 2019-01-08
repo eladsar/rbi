@@ -34,8 +34,6 @@ img_threshold = cv2.THRESH_BINARY
 img_inter = cv2.INTER_NEAREST
 
 clip = args.clip
-clip_rho = args.clip_rho
-
 infinite_horizon = args.infinite_horizon
 
 r_scale = consts.scale_reward[args.game]
@@ -50,25 +48,6 @@ def convert_screen_to_rgb(img, resize=False):
         img = img / img.max()
         img = cv2.resize(img, (128, 1024), interpolation=img_inter)
     return torch.from_numpy(np.rollaxis(img, 2, 0))
-
-
-# def _h_np(r):
-#     return np.sign(r) * np.log(1 + np.abs(r))
-#
-#
-# def _hinv_np(r):
-#     return np.sign(r) * (np.exp(np.abs(r)) - 1)
-#
-# def _hinv_np_2tag(r):
-#     return np.sign(r) * np.exp(np.abs(r))
-#
-#
-# def _h_torch(r):
-#     return torch.sign(r) * torch.log(1 + torch.abs(r))
-#
-#
-# def _hinv_torch(r):
-#     return torch.sign(r) * (torch.exp(torch.abs(r)) - 1)
 
 
 def _h_np(r):
@@ -203,10 +182,14 @@ def _get_td_value(rewards, v_target, discount, n_steps):
     return np.concatenate(values).astype(np.float32)
 
 # get_expected_value = _get_truncated_value
-if args.td:
+if args.target == 'td':
     get_expected_value = _get_td_value
-else:
+elif args.target == 'mc':
     get_expected_value = _get_mc_value
+elif args.target == 'tde':
+    get_expected_value = _get_truncated_value
+else:
+    raise NotImplementedError
 
 def get_gae_est(rewards, v_target, discount):
 
@@ -258,7 +241,7 @@ def get_rho_is(rho, n_steps):
 
         rho_is.append(val)
 
-    return np.minimum(np.concatenate(rho_is), clip_rho).astype(np.float32)
+    return np.concatenate(rho_is).astype(np.float32)
 
 
 def get_tde_value(rewards, discount, n_steps):

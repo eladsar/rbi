@@ -60,7 +60,7 @@ class ObservationsBatchSampler(object):
         self.list_old_path = os.path.join(replay_dir, "list", "old_explore")
 
         self.replay_updates_interval = args.replay_updates_interval
-        self.replay_memory_size = args.replay_memory_size + args.replay_explore_size
+        self.replay_memory_size = args.replay_memory_size
         self.readlock = os.path.join(replay_dir, "list", "readlock_explore.npy")
 
     def __iter__(self):
@@ -137,7 +137,7 @@ class DQNBatchSampler(object):
         self.list_old_path = os.path.join(replay_dir, "list", "old_explore")
 
         self.replay_updates_interval = args.replay_updates_interval
-        self.replay_memory_size = args.replay_memory_size + args.replay_explore_size
+        self.replay_memory_size = args.replay_memory_size
         self.readlock = os.path.join(replay_dir, "list", "readlock_explore.npy")
 
     def __iter__(self):
