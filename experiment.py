@@ -193,6 +193,7 @@ class Experiment(object):
                 self.writer.add_scalar('train_loss/loss_value', float(avg_train_loss_v_beta), n + n_offset)
                 self.writer.add_scalar('train_loss/loss_std', float(avg_train_loss_std), n + n_offset)
 
+                self.writer.add_image('states/state', train_results['image'], n)
                 self.writer.add_scalar('actions/act_diff', float(avg_act_diff), n + n_offset)
 
                 self.writer.add_histogram("actions/agent", train_results['a_agent'], n + n_offset, 'doane')

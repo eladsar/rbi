@@ -12,6 +12,7 @@ img_height = args.height
 interpolation = cv2.INTER_LINEAR  # cv2.INTER_AREA  #
 imread_grayscale = cv2.IMREAD_GRAYSCALE
 
+
 class MemoryRNN(torch.utils.data.Dataset):
 
     def __init__(self):
@@ -24,9 +25,13 @@ class MemoryRNN(torch.utils.data.Dataset):
 
         if args.target == 'tde':
             self.seq_length += self.n_steps
+        else:
+            self.n_steps = 0
 
         self.burn_in = args.burn_in
         self.history_mat = np.expand_dims(np.arange(self.seq_length + self.burn_in), axis=1) + np.arange(self.history_length)
+        self.history_mat = np.fliplr(self.history_mat)
+
         self.hidden_features = args.hidden_features_rnn
         self.seq_overlap = args.seq_overlap
 
@@ -41,11 +46,9 @@ class MemoryRNN(torch.utils.data.Dataset):
         frame0 = [os.path.join(episode_dir, "%d.png" % (frame - i)) for i in range(self.history_length)]
         return np.stack([(cv2.resize(cv2.imread(f0, imread_grayscale).astype(np.float32), (img_width, img_height), interpolation=interpolation) / 256.) for f0 in frame0], axis=0)
 
-
     def preprocess_trajectory(self, episode_dir, frame, k):
 
-        frames = [os.path.join(episode_dir, "%d.png" % max(frame + i, -1))
-                  for i in range(-self.history_length + 1, k)]
+        frames = [os.path.join(episode_dir, "%d.png" % (frame + i)) for i in range(-self.history_length + 1, k)]
         imgs = np.stack([(cv2.resize(cv2.imread(f0, imread_grayscale).astype(np.float32),
                                          (img_width, img_height), interpolation=interpolation) / 256.) for f0 in frames], axis=0)
         return imgs[self.history_mat[:k], :, :]

@@ -89,7 +89,7 @@ class R2D2Agent(Agent):
         # configure learning
 
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
-        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.0001, eps=1e-3, weight_decay=0)
+        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
         self.n_offset = 0
 
     def save_checkpoint(self, path, aux=None):
@@ -117,7 +117,7 @@ class R2D2Agent(Agent):
         target_net.eval()
 
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
-                   'a_player': [], 'loss_std': [], 'mc_val': [], "Hbeta": [], "Hpi": [], "adv_a": [], "q_a": []}
+                   'a_player': [], 'loss_std': [], 'mc_val': [], "Hbeta": [], "Hpi": [], "adv_a": [], "q_a": [], 'image': []}
 
         for n, sample in tqdm(enumerate(self.train_loader)):
 
@@ -126,6 +126,7 @@ class R2D2Agent(Agent):
             s_bi = sample['s_bi'].to(self.device)
             r = sample['r'].to(self.device)
             t = sample['t'].to(self.device)
+            R = sample['rho_q'].to(self.device)
 
             # burn in
             h_q = sample['h_q'].to(self.device).unsqueeze_(0)
@@ -138,12 +139,17 @@ class R2D2Agent(Agent):
             _, _, _, _, q_target, _ = target_net(s, a_tag, self.pi_rand_seq, h_q)
             q_target = q_target.detach()
 
+            # if n <= self.random_initialization * 4 or n <= self.update_target_interval * 4:
+            #     r = R
+            # else:
+            #     r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
+
             r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
             q_a_eval = q_a[:, :-self.n_steps].detach()
 
-            is_value = ((1 - t[:, :-self.n_steps]) * (r - q_a_eval).abs() + self.epsilon_a) ** self.priority_alpha
+            is_value = (1 - t[:, :-self.n_steps]) * ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_alpha
             is_value = is_value / is_value.mean()
-            loss_value = ((q_a[:, :-self.n_steps] - r) ** 2 * is_value * (1 - t[:, :-self.n_steps])).mean()
+            loss_value = ((q_a[:, :-self.n_steps] - r) ** 2 * is_value * (1 - t[:, :-self.n_steps]))[:, -1].mean()
 
             # Learning part
 
@@ -164,19 +170,21 @@ class R2D2Agent(Agent):
                 beta_index = beta_index.numpy()
                 act_diff = (a_index_np != beta_index).astype(np.int)
 
+                R = R.view(-1).data.cpu().numpy()
+
                 # add results
 
                 results['act_diff'].append(act_diff)
                 results['a_agent'].append(beta_index)
-                results['adv_a'].append(q_a)
+                results['adv_a'].append(r)
                 results['q_a'].append(q_a)
                 results['a_player'].append(a_index_np)
                 results['Hbeta'].append(0)
                 results['Hpi'].append(0)
-                results['mc_val'].append(r)
+                results['mc_val'].append(R)
 
                 # add results
-                results['loss_beta'].append(0)
+                results['loss_beta'].append(((R - r) ** 2).mean())
                 results['loss_value'].append(loss_value.data.cpu().numpy())
                 results['loss_std'].append(0)
                 results['n'].append(n)
@@ -196,6 +204,7 @@ class R2D2Agent(Agent):
                     results['q_a'] = np.concatenate(results['q_a'])
                     results['a_player'] = np.concatenate(results['a_player'])
                     results['mc_val'] = np.concatenate(results['mc_val'])
+                    results['image'] = s[0, 0, :-1, :, :].data.cpu()
 
                     yield results
                     self.value_net.train()
@@ -442,7 +451,13 @@ class R2D2Agent(Agent):
                     td_val = get_expected_value(rewards[i], v_target[i], self.discount, self.n_steps)
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
 
+                    mc_val = _get_mc_value(rewards[i], v_target[i], self.discount, self.n_steps)
+
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
+
+                    # hack to save the true target (MC value)
+                    episode_df['rho_q'] = mc_val[self.history_length - 1:self.max_length]
+
                     episode_df['fr_e'] = episode_df[-1]['fr'] + 1
                     trajectory[i].append(episode_df)
 

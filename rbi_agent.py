@@ -524,7 +524,7 @@ class RBIAgent(Agent):
 
                 rewards[i][-1].append(env.r)
                 v_target[i][-1].append(v_expected[i])
-                rho[i][-1].append(np.clip(pi[i][a] / pi_mix[i][a], 1e-5, self.clip_rho))
+                rho[i][-1].append(pi[i][a] / pi_mix[i][a])
 
                 if env.t:
 

@@ -75,7 +75,6 @@ parser.add_argument('--play-episodes-interval', type=int, default=16, metavar='N
 
 parser.add_argument('--clip', type=float, default=0, metavar='VALUE', help='Reward clipping (0 to disable)')
 parser.add_argument('--discount', type=float, default=0.99, metavar='γ', help='Discount factor')
-parser.add_argument('--clip-rho', type=float, default=10, metavar='rho', help='clip Importance Sampling ratio')
 parser.add_argument('--termination-reward', type=float, default=0, help='Reward for terminal state')
 parser.add_argument('--friction-reward', type=float, default=0, help='Negative friction reward')
 
