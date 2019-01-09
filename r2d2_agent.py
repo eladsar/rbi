@@ -139,17 +139,17 @@ class R2D2Agent(Agent):
             _, _, _, _, q_target, _ = target_net(s, a_tag, self.pi_rand_seq, h_q)
             q_target = q_target.detach()
 
-            # if n <= self.random_initialization * 4 or n <= self.update_target_interval * 4:
-            #     r = R
-            # else:
-            #     r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
+            if n <= self.random_initialization * 2 or n <= self.update_target_interval * 2:
+                r = R
+            else:
+                r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
 
-            r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
+            # r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
             q_a_eval = q_a[:, :-self.n_steps].detach()
 
             is_value = (1 - t[:, :-self.n_steps]) * ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_alpha
             is_value = is_value / is_value.mean()
-            loss_value = ((q_a[:, :-self.n_steps] - r) ** 2 * is_value * (1 - t[:, :-self.n_steps]))[:, -1].mean()
+            loss_value = ((q_a[:, :-self.n_steps] - r) ** 2 * is_value * (1 - t[:, :-self.n_steps])).mean()
 
             # Learning part
 
