@@ -328,20 +328,21 @@ class DuelRNN(nn.Module):
 
         super(DuelRNN, self).__init__()
 
-        self.hidden_rnn = int(args.hidden_features_rnn / 2)
+        # self.hidden_rnn = int(args.hidden_features_rnn / 2)
+        self.hidden_rnn = int(args.hidden_features_rnn)
 
         # value net
         self.fc_v = nn.Sequential(
-            # nn.Linear(self.hidden_rnn, args.hidden_features),
-            nn.Linear(3136, args.hidden_features),
+            nn.Linear(self.hidden_rnn, args.hidden_features),
+            # nn.Linear(3136, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, 1),
         )
 
         # advantage net
         self.fc_adv = nn.Sequential(
-            # nn.Linear(self.hidden_rnn, args.hidden_features),
-            nn.Linear(3136, args.hidden_features),
+            nn.Linear(self.hidden_rnn, args.hidden_features),
+            # nn.Linear(3136, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, action_space),
         )
@@ -356,6 +357,12 @@ class DuelRNN(nn.Module):
             nn.ReLU(),
         )
 
+        self.pre_rnn = nn.Sequential(
+            nn.Linear(3136, self.hidden_rnn),
+            nn.ReLU(),
+        )
+
+        self.rnn = nn.GRU(self.hidden_rnn, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
         # self.rnn = nn.GRU(3136, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
         # self.rnn = nn.LSTM(3136, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
 
@@ -372,11 +379,13 @@ class DuelRNN(nn.Module):
         s = self.cnn(s)
         s = s.view(batch, seq, 3136)
 
+        s = self.pre_rnn(s)
+
         # h = h.view(1, batch, self.hidden_rnn, 2)
         # s, h = self.rnn(s, (h[:,:,:,0].contiguous(), h[:,:,:,1].contiguous()))
         # h = torch.cat(h, dim=2)
         #
-        # # s, h = self.rnn(s, h)
+        s, h = self.rnn(s, h)
 
         v = self.fc_v(s)
         adv_tilde = self.fc_adv(s)

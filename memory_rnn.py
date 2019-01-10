@@ -65,6 +65,7 @@ class ObservationsRNNMemory(MemoryRNN):
 
         # if the first episode is too short s.t. there is no hidden state sample, take the second episode
 
+        tde = samples['tde'][self.seq_length + self.burn_in]
         if (samples['fr_e'][0] - samples['fr'][0]) <= (self.burn_in + (-samples['fr'][0] % self.seq_overlap)):
 
             # take the second episode
@@ -96,9 +97,11 @@ class ObservationsRNNMemory(MemoryRNN):
         s = np.pad(s, [(pad_l, pad_r), (0, 0), (0, 0), (0, 0)], 'constant', constant_values=0)
         t = np.pad(samples['t'], [(pad_l, pad_r)], 'constant', constant_values=1)
 
+
         return {'s': s[self.burn_in:], 'r': r[-self.seq_length:-self.n_steps], 'rho_q': rho_q[-self.seq_length:-self.n_steps],
                 'rho_v': rho_v[self.burn_in:], 'a': a[self.burn_in:], 'pi': pi[self.burn_in:],
-                'h_q': h_q, 'h_beta': h_beta, 's_bi': s[:self.burn_in], 't': t[self.burn_in:]}
+                'h_q': h_q, 'h_beta': h_beta, 's_bi': s[:self.burn_in], 't': t[self.burn_in:],
+                'tde': tde}
 
 
 class ObservationsRNNBatchSampler(object):
@@ -116,6 +119,9 @@ class ObservationsRNNBatchSampler(object):
         self.readlock = os.path.join(replay_dir, "list", "readlock_explore.npy")
 
         self.rec_type = consts.rec_type
+
+        self.priority_alpha = args.priority_alpha
+        self.epsilon_a = args.epsilon_a
 
     def __iter__(self):
 
@@ -150,6 +156,9 @@ class ObservationsRNNBatchSampler(object):
 
             replay_buffer = replay_buffer[-self.replay_memory_size - offset:]
 
+            tde = replay_buffer['tde'][total_seq_length:]
+            tde = (tde + self.epsilon_a) ** self.priority_alpha
+
             # save previous traj_old to file
             np.save(self.list_old_path, np.array([traj_old]))
             traj_old = replay_buffer['traj'][0]
@@ -157,16 +166,14 @@ class ObservationsRNNBatchSampler(object):
             print("New Sample size is: %d" % len(replay))
 
             len_replay_buffer = len(replay_buffer) - total_seq_length
-
             minibatches = min(self.replay_updates_interval, int(len_replay_buffer / self.batch))
-
-            shuffle_indexes = np.random.choice(len_replay_buffer, minibatches * self.batch, replace=False)
+            shuffle_indexes = np.random.choice(len_replay_buffer, (minibatches, self.batch), replace=False, p=tde/tde.sum())
 
             print("Explorer:Replay Buffer size is: %d" % len_replay_buffer)
 
             for i in range(minibatches):
 
-                samples = np.expand_dims(shuffle_indexes[i * self.batch:(i + 1) * self.batch], axis=1) + sequence
+                samples = shuffle_indexes[i, :, None] + sequence
                 yield replay_buffer[samples]
 
     def __len__(self):

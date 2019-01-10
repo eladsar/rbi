@@ -60,6 +60,8 @@ class Agent(object):
         self.burn_in = args.burn_in
         self.seq_overlap = args.seq_overlap
 
+        self.eta = 6
+
         self.checkpoint = checkpoint
         self.root_dir = root_dir
         self.best_player_dir = os.path.join(root_dir, "best")

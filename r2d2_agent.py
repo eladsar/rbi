@@ -17,7 +17,7 @@ from model import BehavioralRNN, DuelRNN
 from memory_rnn import ObservationsRNNMemory, ObservationsRNNBatchSampler
 from agent import Agent
 from environment import Env
-from preprocess import get_expected_value, release_file, lock_file, get_rho_is, _get_mc_value, h_torch, hinv_torch
+from preprocess import get_expected_value, release_file, lock_file, _get_td_value, _get_mc_value, h_torch, hinv_torch
 import cv2
 import os
 import time
@@ -89,7 +89,7 @@ class R2D2Agent(Agent):
         # configure learning
 
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
-        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
+        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.001, eps=1e-3, weight_decay=0)
         self.n_offset = 0
 
     def save_checkpoint(self, path, aux=None):
@@ -127,6 +127,7 @@ class R2D2Agent(Agent):
             r = sample['r'].to(self.device)
             t = sample['t'].to(self.device)
             R = sample['rho_q'].to(self.device)
+            tde = sample['tde'].to(self.device)
 
             # burn in
             h_q = sample['h_q'].to(self.device).unsqueeze_(0)
@@ -139,16 +140,21 @@ class R2D2Agent(Agent):
             _, _, _, _, q_target, _ = target_net(s, a_tag, self.pi_rand_seq, h_q)
             q_target = q_target.detach()
 
-            if n <= self.random_initialization * 2 or n <= self.update_target_interval * 2:
+            if n <= self.update_target_interval * 2:
                 r = R
             else:
                 r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
 
             # r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
-            q_a_eval = q_a[:, :-self.n_steps].detach()
 
-            is_value = (1 - t[:, :-self.n_steps]) * ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_alpha
+            # q_a_eval = q_a[:, :-self.n_steps].detach()
+            # is_value = (1 - t[:, :-self.n_steps]) * ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_alpha
+            # is_value = is_value / is_value.mean()
+
+            is_value = (1 / (tde + self.epsilon_a)) ** self.priority_beta
             is_value = is_value / is_value.mean()
+            is_value = is_value.unsqueeze(1).repeat(1, self.seq_length - self.n_steps)
+
             loss_value = ((q_a[:, :-self.n_steps] - r) ** 2 * is_value * (1 - t[:, :-self.n_steps])).mean()
 
             # Learning part
@@ -159,37 +165,39 @@ class R2D2Agent(Agent):
 
             # collect actions statistics
 
-            if not (n + 1 + self.n_offset) % 50:
+            if not (n + 1 + self.n_offset) % 10:
 
-                a_index_np = a[:, :-self.n_steps, 0].contiguous().view(-1).data.cpu().numpy()
+                if not (n + 1 + self.n_offset) % 50:
 
-                q_a = q_a[:, :-self.n_steps].contiguous().view(-1).data.cpu().numpy()
-                r = r.view(-1).data.cpu().numpy()
+                    a_index_np = a[:, :-self.n_steps, 0].contiguous().view(-1).data.cpu().numpy()
 
-                _, beta_index = q[:, :-self.n_steps, :].contiguous().view(-1, self.action_space).data.cpu().max(1)
-                beta_index = beta_index.numpy()
-                act_diff = (a_index_np != beta_index).astype(np.int)
+                    q_a = q_a[:, :-self.n_steps].contiguous().view(-1).data.cpu().numpy()
+                    r = r.view(-1).data.cpu().numpy()
 
-                R = R.view(-1).data.cpu().numpy()
+                    _, beta_index = q[:, :-self.n_steps, :].contiguous().view(-1, self.action_space).data.cpu().max(1)
+                    beta_index = beta_index.numpy()
+                    act_diff = (a_index_np != beta_index).astype(np.int)
 
-                # add results
+                    R = R.view(-1).data.cpu().numpy()
 
-                results['act_diff'].append(act_diff)
-                results['a_agent'].append(beta_index)
-                results['adv_a'].append(r)
-                results['q_a'].append(q_a)
-                results['a_player'].append(a_index_np)
-                results['Hbeta'].append(0)
-                results['Hpi'].append(0)
-                results['mc_val'].append(R)
+                    # add results
 
-                # add results
-                results['loss_beta'].append(((R - r) ** 2).mean())
-                results['loss_value'].append(loss_value.data.cpu().numpy())
-                results['loss_std'].append(0)
-                results['n'].append(n)
+                    results['act_diff'].append(act_diff)
+                    results['a_agent'].append(beta_index)
+                    results['adv_a'].append(r)
+                    results['q_a'].append(q_a)
+                    results['a_player'].append(a_index_np)
+                    results['Hbeta'].append(0)
+                    results['Hpi'].append(0)
+                    results['mc_val'].append(R)
 
-                if not (n+1) % self.update_target_interval:
+                    # add results
+                    results['loss_beta'].append(((R - r) ** 2).mean())
+                    results['loss_value'].append(loss_value.data.cpu().numpy())
+                    results['loss_std'].append(0)
+                    results['n'].append(n)
+
+                if not (n + 1 + self.n_offset) % self.update_target_interval:
                     # save agent state
                     target_net.load_state_dict(self.value_net.state_dict())
 
@@ -346,6 +354,7 @@ class R2D2Agent(Agent):
 
         rewards = [[[]] for _ in range(n_players)]
         v_target = [[[]] for _ in range(n_players)]
+        q_expected = [[] for _ in range(n_players)]
         episode = [[] for _ in range(n_players)]
         image_dir = ['' for _ in range(n_players)]
         trajectory = [[] for _ in range(n_players)]
@@ -432,7 +441,7 @@ class R2D2Agent(Agent):
                 episode[i].append(np.array((self.frame, a, pi[i],
                                             h_beta_save, h_q_save,
                                             episode_num[i], 0., fr_s[i], 0,
-                                            0., 1., 1., 0), dtype=self.rec_type))
+                                            0., 1., 1., 0, 1.), dtype=self.rec_type))
 
                 env.step(a)
 
@@ -443,13 +452,29 @@ class R2D2Agent(Agent):
 
                 rewards[i][-1].append(env.r)
                 v_target[i][-1].append(v_expected[i])
+                q_expected[i].append(q[i][a])
 
                 if env.t:
 
                     # cancel termination reward
                     rewards[i][-1][-1] -= self.termination_reward * int(env.k * self.skip >= self.max_length or env.score >= self.max_score)
                     td_val = get_expected_value(rewards[i], v_target[i], self.discount, self.n_steps)
+
+
+                    # tde calculations
+                    td_target = _get_td_value(rewards[i], v_target[i], self.discount, self.n_steps)
+
+                    tde = np.abs(np.array(q_expected[i]) - td_target)
+
+                    tde = tde ** self.eta
+                    n = self.seq_length-self.n_steps
+                    tde = np.convolve(tde, np.ones(n) / n, mode='full')[n-1:]
+                    tde = tde ** (1/self.eta)
+                    # up to here
+
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
+
+                    episode_df['tde'] = tde[self.history_length - 1:self.max_length]
 
                     mc_val = _get_mc_value(rewards[i], v_target[i], self.discount, self.n_steps)
 
@@ -469,6 +494,7 @@ class R2D2Agent(Agent):
 
                     env.reset()
                     episode[i] = []
+                    q_expected[i] = []
                     rewards[i] = [[]]
                     v_target[i] = [[]]
                     lives[i] = env.lives

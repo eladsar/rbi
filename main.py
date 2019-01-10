@@ -7,6 +7,8 @@ import time
 
 def main():
 
+    torch.set_num_threads(1000)
+    print("Torch %d" % torch.get_num_threads())
     # print args of current run
     logger.info("Welcome to Learning from Demonstration simulation")
     logger.info(' ' * 26 + 'Simulation Hyperparameters')

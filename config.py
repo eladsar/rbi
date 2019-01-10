@@ -96,7 +96,7 @@ parser.add_argument('--epsilon-post', type=float, default=0.00164, metavar='ε',
 parser.add_argument('--temperature-soft', type=float, default=2, metavar='ε', help='temperature parameter for random exploration')
 
 # dataloader
-parser.add_argument('--cpu-workers', type=int, default=24, help='How many CPUs will be used for the data loading')
+parser.add_argument('--cpu-workers', type=int, default=64, help='How many CPUs will be used for the data loading')
 parser.add_argument('--cuda-default', type=int, default=0, help='Default GPU')
 
 # train parameters
@@ -219,7 +219,7 @@ class Consts(object):
     rec_type = np.dtype([('fr', np.int), ('a', np.int), ('pi', np.float32, len(np.nonzero(actions[args.game])[0])),
                              ('h_beta', np.float32, args.hidden_features_rnn), ('h_q', np.float32, args.hidden_features_rnn),
                              ('ep', np.int), ('t', np.float32), ('fr_s', np.int), ('fr_e', np.int),
-                             ('r', np.float32), ('rho_v', np.float32), ('rho_q', np.float32), ('traj', np.int)])
+                             ('r', np.float32), ('rho_v', np.float32), ('rho_q', np.float32), ('traj', np.int), ('tde', np.float32)])
 
 
 consts = Consts()
