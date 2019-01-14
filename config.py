@@ -80,6 +80,7 @@ parser.add_argument('--friction-reward', type=float, default=0, help='Negative f
 
 parser.add_argument('--priority-alpha', type=float, default=0.5, metavar='α', help='Attenuation factor for the prioritized replay distribution')
 parser.add_argument('--priority-beta', type=float, default=0.5, metavar='β', help='Priority importance sampling coefficient')
+parser.add_argument('--priority-eta', type=float, default=0.9, metavar='η', help='Priority time series coefficient')
 parser.add_argument('--epsilon-a', type=float, default=0.001, metavar='ε', help='Priority replay epsilon-a')
 parser.add_argument('--cmin', type=float, default=0.1, metavar='c_min', help='Lower reroute threshold')
 parser.add_argument('--cmax', type=float, default=2, metavar='c_max', help='Upper reroute threshold')

@@ -6,6 +6,7 @@ from tqdm import tqdm
 import cv2
 import itertools
 import fcntl
+import pandas as pd
 
 from config import args, consts
 
@@ -13,6 +14,8 @@ from config import args, consts
 
 img_width = args.width
 img_height = args.height
+priority_eta = args.priority_eta
+seq_length = args.seq_length
 
 # consts:
 
@@ -287,6 +290,20 @@ def get_tde_value(rewards, discount, n_steps):
 
     return np.concatenate(values).astype(np.float32), np.concatenate(terminals).astype(np.float32)
 
+def get_tde(rewards, v_target, discount, n_steps, q_expected):
+
+    # tde calculations
+    td_target = _get_td_value(rewards, v_target, discount, n_steps)
+    tde = (np.abs(np.array(q_expected) - td_target) + 0.1) / (np.abs(td_target) + 0.1)
+
+    n = seq_length - n_steps
+    global_avg = tde.mean()
+    avg_td = np.convolve(tde, np.ones(n) / n, mode='full')[:-(n - 1)]
+    tde = np.concatenate((tde, np.ones(n - 1) * global_avg))
+    max_tde = pd.Series(tde).rolling(n).max().dropna().values
+    # up to here
+
+    return priority_eta * max_tde + (1 - priority_eta) * avg_td
 
 def get_gtd_value(rewards, v_target, discount, mu, sigma):
 

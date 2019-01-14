@@ -7,6 +7,7 @@ import torch.optim.lr_scheduler
 import numpy as np
 from tqdm import tqdm
 from torch.nn import functional as F
+import torch.nn as nn
 
 from config import consts, args
 import psutil
@@ -17,7 +18,7 @@ from model import BehavioralRNN, DuelRNN
 from memory_rnn import ObservationsRNNMemory, ObservationsRNNBatchSampler
 from agent import Agent
 from environment import Env
-from preprocess import get_expected_value, release_file, lock_file, _get_td_value, _get_mc_value, h_torch, hinv_torch
+from preprocess import get_expected_value, get_tde, release_file, lock_file, _get_td_value, _get_mc_value, h_torch, hinv_torch
 import cv2
 import os
 import time
@@ -34,7 +35,11 @@ class R2D2Agent(Agent):
 
         print("Learning with RBIRNNAgent")
         super(R2D2Agent, self).__init__(root_dir, checkpoint)
-        self.value_net = DuelRNN().to(self.device)
+
+        self.value_net = DuelRNN()
+        if torch.cuda.device_count() > 1:
+            self.value_net = nn.DataParallel(self.value_net)
+        self.value_net.to(self.device)
 
         self.pi_rand = np.ones(self.action_space) / self.action_space
         self.pi_rand_seq = torch.ones(self.batch, self.seq_length, self.action_space,  dtype=torch.float).to(self.device) / self.action_space
@@ -94,23 +99,40 @@ class R2D2Agent(Agent):
 
     def save_checkpoint(self, path, aux=None):
 
-        state = {'value_net': self.value_net.state_dict(),
-                 'optimizer_value': self.optimizer_value.state_dict(),
-                 'aux': aux}
+        if torch.cuda.device_count() > 1:
+            state = {'value_net': self.value_net.module.state_dict(),
+                     'optimizer_value': self.optimizer_value.state_dict(),
+                     'aux': aux}
+        else:
+            state = {'value_net': self.value_net.state_dict(),
+                     'optimizer_value': self.optimizer_value.state_dict(),
+                     'aux': aux}
+
 
         torch.save(state, path)
 
     def load_checkpoint(self, path):
 
         state = torch.load(path, map_location="cuda:%d" % self.cuda_id)
-        self.value_net.load_state_dict(state['value_net'])
-        self.optimizer_value.load_state_dict(state['optimizer_value'])
+
+        if torch.cuda.device_count() > 1:
+            self.value_net.module.load_state_dict(state['value_net'])
+            self.optimizer_value.load_state_dict(state['optimizer_value'])
+        else:
+            self.value_net.load_state_dict(state['value_net'])
+            self.optimizer_value.load_state_dict(state['optimizer_value'])
+
+
         self.n_offset = state['aux']['n']
         return state['aux']
 
     def learn(self, n_interval, n_tot):
 
-        target_net = DuelRNN().to(self.device)
+        target_net = DuelRNN()
+        if torch.cuda.device_count() > 1:
+            target_net = nn.DataParallel(target_net)
+        target_net.to(self.device)
+
         target_net.load_state_dict(self.value_net.state_dict())
 
         self.value_net.train()
@@ -130,22 +152,22 @@ class R2D2Agent(Agent):
             tde = sample['tde'].to(self.device)
 
             # burn in
-            h_q = sample['h_q'].to(self.device).unsqueeze_(0)
+            h_q = sample['h_q'].to(self.device)
 
-            _, _, _, _, _, h_q = self.value_net(s_bi, self.a_zeros_bi, self.pi_rand_bi, h_q)
+            _, _, h_q = self.value_net(s_bi, self.a_zeros_bi, self.pi_rand_bi, h_q)
 
-            _, _, _, q, q_a, _ = self.value_net(s, a, self.pi_rand_seq, h_q)
+            q, q_a, _ = self.value_net(s, a, self.pi_rand_seq, h_q)
             a_tag = torch.argmax(q, dim=2).detach().unsqueeze(2)
 
-            _, _, _, _, q_target, _ = target_net(s, a_tag, self.pi_rand_seq, h_q)
+            _, q_target, _ = target_net(s, a_tag, self.pi_rand_seq, h_q)
             q_target = q_target.detach()
 
-            if n <= self.update_target_interval * 2:
-                r = R
-            else:
-                r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
+            # if n <= self.update_target_interval * 2:
+            #     r = R
+            # else:
+            #     r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
 
-            # r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
+            r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
 
             # q_a_eval = q_a[:, :-self.n_steps].detach()
             # is_value = (1 - t[:, :-self.n_steps]) * ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_alpha
@@ -272,7 +294,7 @@ class R2D2Agent(Agent):
             self.value_net.eval()
 
             # Initial states
-            h_q = torch.zeros(1, 1, self.hidden_state).to(self.device)
+            h_q = torch.zeros(1, self.hidden_state).to(self.device)
 
             while not self.env.t:
 
@@ -289,10 +311,9 @@ class R2D2Agent(Agent):
 
                 # take q as adv
 
-                v, _, _, q, _, h_q = self.value_net(s, self.a_zeros, pi_rand_t, h_q)
+                q, _, h_q = self.value_net(s, self.a_zeros, pi_rand_t, h_q)
 
                 q = q.squeeze(0).squeeze(0).data.cpu().numpy()
-                v_expected = v.squeeze(0).squeeze(0).data.cpu().numpy()
 
                 if self.n_offset >= self.random_initialization:
 
@@ -317,10 +338,11 @@ class R2D2Agent(Agent):
                     lives = self.env.lives
 
                     rewards[-1].append(self.env.r)
-                    v_target[-1].append(v_expected)
+                    v_target[-1].append(0)
                     q_val.append(q[a])
 
                 self.frame += 1
+
 
             mc_val = _get_mc_value(rewards, None, self.discount, None)
             q_val = np.array(q_val)
@@ -375,7 +397,7 @@ class R2D2Agent(Agent):
         release_file(fwrite)
 
         # Initial states
-        h_q = torch.zeros(1, n_players, self.hidden_state).to(self.device)
+        h_q = torch.zeros(n_players, self.hidden_state).to(self.device)
 
         for i in range(n_players):
             mp_env[i].reset()
@@ -395,21 +417,14 @@ class R2D2Agent(Agent):
                 self.value_net.eval()
 
             # save previous hidden state to np object
-            h_q_np = h_q.squeeze(0).data.cpu().numpy()
+            h_q_np = h_q.data.cpu().numpy()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device).unsqueeze(1)
 
             # take q as adv
-            v_expected, _, _, q, _, h_q = self.value_net(s, a_zeros_mp, pi_rand_t, h_q)
+            q, _, h_q = self.value_net(s, a_zeros_mp, pi_rand_t, h_q)
 
             q = q.squeeze(1).data.cpu().numpy()
-            v_expected = v_expected.squeeze(1).squeeze(1).data.cpu().numpy()
-
-            # mp_trigger = np.logical_and(
-            #     np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
-            #     explore_threshold >= 0)
-
-            # exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
             exploration = np.repeat(np.expand_dims(mp_explore, axis=1), self.action_space, axis=1)
 
             if self.n_offset >= self.random_initialization:
@@ -442,7 +457,6 @@ class R2D2Agent(Agent):
                                             h_beta_save, h_q_save,
                                             episode_num[i], 0., fr_s[i], 0,
                                             0., 1., 1., 0, 1.), dtype=self.rec_type))
-
                 env.step(a)
 
                 if lives[i] > env.lives:
@@ -451,7 +465,7 @@ class R2D2Agent(Agent):
                 lives[i] = env.lives
 
                 rewards[i][-1].append(env.r)
-                v_target[i][-1].append(v_expected[i])
+                v_target[i][-1].append(q[i].max())
                 q_expected[i].append(q[i][a])
 
                 if env.t:
@@ -460,21 +474,10 @@ class R2D2Agent(Agent):
                     rewards[i][-1][-1] -= self.termination_reward * int(env.k * self.skip >= self.max_length or env.score >= self.max_score)
                     td_val = get_expected_value(rewards[i], v_target[i], self.discount, self.n_steps)
 
-
-                    # tde calculations
-                    td_target = _get_td_value(rewards[i], v_target[i], self.discount, self.n_steps)
-
-                    tde = np.abs(np.array(q_expected[i]) - td_target)
-
-                    tde = tde ** self.eta
-                    n = self.seq_length-self.n_steps
-                    tde = np.convolve(tde, np.ones(n) / n, mode='full')[n-1:]
-                    tde = tde ** (1/self.eta)
-                    # up to here
-
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
 
-                    episode_df['tde'] = tde[self.history_length - 1:self.max_length]
+                    # tde = get_tde(rewards[i], v_target[i], self.discount, self.n_steps, q_expected[i])
+                    # episode_df['tde'] = tde[self.history_length - 1:self.max_length]
 
                     mc_val = _get_mc_value(rewards[i], v_target[i], self.discount, self.n_steps)
 
@@ -487,7 +490,7 @@ class R2D2Agent(Agent):
                     trajectory[i].append(episode_df)
 
                     # reset hidden states
-                    h_q[:, i, :].zero_()
+                    h_q[i, :].zero_()
 
                     print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
                           (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), 1, time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))

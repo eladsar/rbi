@@ -86,16 +86,16 @@ class ObservationsRNNMemory(MemoryRNN):
         episode_dir = os.path.join(self.screen_dir, str(samples['ep'][0]))
         s = self.preprocess_trajectory(episode_dir, samples['fr'][0], prune_length)
 
-        h_q = samples['h_q'][0] if not pad_l else np.zeros(self.hidden_features, dtype=np.float32)
-        h_beta = samples['h_beta'][0] if not pad_l else np.zeros(self.hidden_features, dtype=np.float32)
+        h_q = samples['h_q'][0]
+        h_beta = samples['h_beta'][0]
 
-        r = np.pad(samples['r'], [(pad_l, pad_r)], 'constant', constant_values=0)
-        rho_v = np.pad(samples['rho_v'], [(pad_l, pad_r)], 'constant', constant_values=0)
-        rho_q = np.pad(samples['rho_q'], [(pad_l, pad_r)], 'constant', constant_values=0)
-        a = np.pad(samples['a'], [(pad_l, pad_r)], 'constant', constant_values=0)
-        pi = np.pad(np.stack(samples['pi']), [(pad_l, pad_r), (0, 0)], 'constant', constant_values=0)
-        s = np.pad(s, [(pad_l, pad_r), (0, 0), (0, 0), (0, 0)], 'constant', constant_values=0)
-        t = np.pad(samples['t'], [(pad_l, pad_r)], 'constant', constant_values=1)
+        r = np.pad(samples['r'], [(0, pad_r + pad_l)], 'constant', constant_values=0)
+        rho_v = np.pad(samples['rho_v'], [(0, pad_r + pad_l)], 'constant', constant_values=0)
+        rho_q = np.pad(samples['rho_q'], [(0, pad_r + pad_l)], 'constant', constant_values=0)
+        a = np.pad(samples['a'], [(0, pad_r + pad_l)], 'constant', constant_values=0)
+        pi = np.pad(np.stack(samples['pi']), [(0, pad_r + pad_l), (0, 0)], 'constant', constant_values=0)
+        s = np.pad(s, [(0, pad_r + pad_l), (0, 0), (0, 0), (0, 0)], 'constant', constant_values=0)
+        t = np.pad(samples['t'], [(0, pad_r + pad_l)], 'constant', constant_values=1)
 
 
         return {'s': s[self.burn_in:], 'r': r[-self.seq_length:-self.n_steps], 'rho_q': rho_q[-self.seq_length:-self.n_steps],
