@@ -85,3 +85,4 @@ mkdir -p ~/projects/rbi
 cd ~/projects/rbi
 
 in all project change all "sarafie" and "elad" to <username>
+
