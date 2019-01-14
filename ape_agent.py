@@ -225,8 +225,8 @@ class ApeAgent(Agent):
                 traj_num = int(traj.split(".")[0])
                 if traj_num < traj_min:
                     traj_data = np.load(os.path.join(trajectory_dir, traj))
-                    for d in traj_data:
-                        episode_list.add(d['ep'])
+                    for d in traj_data['ep']:
+                        episode_list.add(d)
                     os.remove(os.path.join(trajectory_dir, traj))
 
             for ep in episode_list:
