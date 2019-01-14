@@ -123,6 +123,8 @@ class ObservationsRNNBatchSampler(object):
         self.priority_alpha = args.priority_alpha
         self.epsilon_a = args.epsilon_a
 
+        self.tde = np.array([])
+
     def __iter__(self):
 
         traj_old = 0
@@ -158,6 +160,7 @@ class ObservationsRNNBatchSampler(object):
 
             tde = replay_buffer['tde'][total_seq_length:]
             tde = (tde + self.epsilon_a) ** self.priority_alpha
+            self.tde = tde / tde.sum()
 
             # save previous traj_old to file
             np.save(self.list_old_path, np.array([traj_old]))
@@ -167,7 +170,9 @@ class ObservationsRNNBatchSampler(object):
 
             len_replay_buffer = len(replay_buffer) - total_seq_length
             minibatches = min(self.replay_updates_interval, int(len_replay_buffer / self.batch))
-            shuffle_indexes = np.random.choice(len_replay_buffer, (minibatches, self.batch), replace=False, p=tde/tde.sum())
+
+            shuffle_indexes = np.random.choice(len_replay_buffer, (minibatches, self.batch), replace=False,
+                                               p=self.tde)
 
             print("Explorer:Replay Buffer size is: %d" % len_replay_buffer)
 

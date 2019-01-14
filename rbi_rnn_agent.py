@@ -564,10 +564,6 @@ class RBIRNNAgent(Agent):
                                             episode_num[i], 0., fr_s[i], 0,
                                             0., 1., 1., 0), dtype=self.rec_type))
 
-                # episode[i].append({"fr": self.frame, "a": a, "pi": pi[i],
-                #                    "h_beta": h_beta_save, "h_q": h_q_save,
-                #                    "ep": episode_num[i], "t": 0, 'fr_s': fr_s[i]})
-
                 env.step(a)
 
                 if lives[i] > env.lives:
@@ -595,9 +591,7 @@ class RBIRNNAgent(Agent):
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
                     episode_df['rho_v'] = np.clip(rho_vec, 0, 1)[self.history_length - 1:self.max_length]
                     episode_df['rho_q'] = np.clip(rho_val, 0, 1)[self.history_length - 1:self.max_length]
-
                     episode_df['fr_e'] = episode_df[-1]['fr'] + 1
-                    # episode_df['fr_e'] = episode_df.iloc[-1]['fr'] + 1
 
                     trajectory[i].append(episode_df)
 

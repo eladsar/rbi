@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 identifier=$1
-resume=$2
-game=$3
+game=$2
+resume=$3
 
 
 CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --algorithm=ppo --cuda-default=0 --n-actors=16 --actor-index=0 &

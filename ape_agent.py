@@ -111,7 +111,8 @@ class ApeAgent(Agent):
         target_net.eval()
 
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
-                   'a_player': [], 'loss_std': [], 'mc_val': [], "Hbeta": [], "Hpi": [], "adv_a": [], "q_a": []}
+                   'a_player': [], 'loss_std': [], 'mc_val': [], "Hbeta": [], "Hpi": [],
+                   "adv_a": [], "q_a": [], 'image': []}
 
         for n, sample in tqdm(enumerate(self.train_loader)):
 
@@ -127,7 +128,7 @@ class ApeAgent(Agent):
             self.dqn_net.eval()
             _, _, _, q, q_a_eval = self.dqn_net(s, a, aux)
             q_a_eval = q_a_eval.detach()
-            # v_eval = v_eval.detach()
+
             _, _, _, q_tag_eval, _ = self.dqn_net(s_tag, self.a_zeros_batch, aux_tag)
             q_tag_eval = q_tag_eval.detach()
             self.dqn_net.train()
@@ -195,6 +196,7 @@ class ApeAgent(Agent):
                     results['q_a'] = np.concatenate(results['q_a'])
                     results['a_player'] = np.concatenate(results['a_player'])
                     results['mc_val'] = np.concatenate(results['mc_val'])
+                    results['image'] = s[0, :-1, :, :].data.cpu()
 
                     yield results
                     self.dqn_net.train()
@@ -398,7 +400,11 @@ class ApeAgent(Agent):
 
                 env = mp_env[i]
                 cv2.imwrite(os.path.join(image_dir[i], "%s.png" % str(self.frame)), mp_env[i].image, [imcompress, compress_level])
-                episode[i].append({"fr": self.frame, "a": a, "r": 0, "aux": aux_np[i], "ep": episode_num[i], "t": 0})
+
+                episode[i].append(np.array((self.frame, a, pi[i],
+                                            None, None,
+                                            episode_num[i], 0., 0, 0,
+                                            0., 1., 1., 0, 1., aux_np[i]), dtype=self.rec_type))
 
                 env.step(a)
 
@@ -412,11 +418,11 @@ class ApeAgent(Agent):
 
                     td_val, t_val = get_tde_value(rewards[i], self.discount, self.n_steps)
 
-                    for j, record in enumerate(episode[i]):
-                        record['r'] = td_val[j]
-                        record['t'] = t_val[j]
+                    episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
+                    episode_df['r'] = td_val[self.history_length - 1:self.max_length]
+                    episode_df['t'] = t_val[self.history_length - 1:self.max_length]
 
-                    trajectory[i] += episode[i][self.history_length - 1:self.max_length]
+                    trajectory[i].append(episode_df)
 
                     print("rbi | st: %d | sc: %d | e: %g | n-step: %s | n %d | avg: %g" %
                           (self.frame, env.score, mp_explore[i], str(self.n_steps), self.n_offset,
@@ -441,7 +447,7 @@ class ApeAgent(Agent):
                     image_dir[i] = os.path.join(screen_dir[i], str(episode_num[i]))
                     os.mkdir(image_dir[i])
 
-                    if len(trajectory[i]) >= self.player_replay_size:
+                    if sum([len(j) for j in trajectory[i]]) >= self.player_replay_size:
 
                         # write if enough space is available
                         if psutil.virtual_memory().available >= mem_threshold:
@@ -454,13 +460,10 @@ class ApeAgent(Agent):
                             # unlock file
                             release_file(fwrite)
 
-                            traj_to_save = trajectory[i]
-
-                            for j in range(len(traj_to_save)):
-                                traj_to_save[j]['traj'] = traj_num
+                            traj_to_save = np.concatenate(trajectory[i])
+                            traj_to_save['traj'] = traj_num
 
                             traj_file = os.path.join(trajectory_dir[i], "%d.npy" % traj_num)
-
                             np.save(traj_file, traj_to_save)
 
                             fread = lock_file(readlock[i])

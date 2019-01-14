@@ -48,8 +48,6 @@ class R2D2Agent(Agent):
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
         self.a_zeros_bi = torch.zeros(self.batch, self.burn_in, 1, dtype=torch.long).to(self.device)
 
-        self.rec_type = consts.rec_type
-
         if player:
 
             # play variables
@@ -162,16 +160,7 @@ class R2D2Agent(Agent):
             _, q_target, _ = target_net(s, a_tag, self.pi_rand_seq, h_q)
             q_target = q_target.detach()
 
-            # if n <= self.update_target_interval * 2:
-            #     r = R
-            # else:
-            #     r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
-
             r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
-
-            # q_a_eval = q_a[:, :-self.n_steps].detach()
-            # is_value = (1 - t[:, :-self.n_steps]) * ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_alpha
-            # is_value = is_value / is_value.mean()
 
             is_value = (1 / (tde + self.epsilon_a)) ** self.priority_beta
             is_value = is_value / is_value.mean()
@@ -456,7 +445,7 @@ class R2D2Agent(Agent):
                 episode[i].append(np.array((self.frame, a, pi[i],
                                             h_beta_save, h_q_save,
                                             episode_num[i], 0., fr_s[i], 0,
-                                            0., 1., 1., 0, 1.), dtype=self.rec_type))
+                                            0., 1., 1., 0, 1., 0), dtype=self.rec_type))
                 env.step(a)
 
                 if lives[i] > env.lives:

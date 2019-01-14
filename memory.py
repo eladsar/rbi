@@ -45,7 +45,8 @@ class ObservationsMemory(Memory):
         episode_dir = os.path.join(self.screen_dir, str(sample['ep']))
         s = self.preprocess_history(episode_dir, sample['fr'])
 
-        return {'s': s, 'r': sample['r'], 'rho': sample['rho'], 'a': sample['a'], 'pi': sample['pi'],
+        return {'s': s, 'r': sample['r'], 'rho_v': sample['rho_v'],
+                'rho_q': sample['rho_q'], 'a': sample['a'], 'pi': sample['pi'],
                 'aux': sample['aux']}
 
 
@@ -63,10 +64,12 @@ class ObservationsBatchSampler(object):
         self.replay_memory_size = args.replay_memory_size
         self.readlock = os.path.join(replay_dir, "list", "readlock_explore.npy")
 
+        self.rec_type = consts.rec_type
+
     def __iter__(self):
 
         traj_old = 0
-        replay_buffer = np.array([])
+        replay_buffer = np.array([], dtype=self.rec_type)
 
         while True:
 
@@ -94,13 +97,13 @@ class ObservationsBatchSampler(object):
             len_replay_buffer = len(replay_buffer)
 
             minibatches = min(self.replay_updates_interval, int(len_replay_buffer / self.batch))
-
-            shuffle_indexes = np.random.choice(len_replay_buffer, minibatches * self.batch, replace=False)
+            shuffle_indexes = np.random.choice(len_replay_buffer, (minibatches, self.batch), replace=False)
 
             print("Explorer:Replay Buffer size is: %d" % len_replay_buffer)
 
             for i in range(minibatches):
-                yield replay_buffer[shuffle_indexes[i * self.batch:(i + 1) * self.batch]]
+                samples = shuffle_indexes[i]
+                yield replay_buffer[samples]
 
     def __len__(self):
         return np.inf
@@ -127,58 +130,5 @@ class DQNMemory(Memory):
                 'aux': sample['aux'], 's_tag': s_tag, 'aux_tag': sample['aux']}
 
 
-class DQNBatchSampler(object):
-
-    def __init__(self, replay_dir):
-        self.batch = args.batch
-
-        self.screen_dir = os.path.join(replay_dir, "explore", "screen")
-        self.trajectory_dir = os.path.join(replay_dir, "explore", "trajectory")
-        self.list_old_path = os.path.join(replay_dir, "list", "old_explore")
-
-        self.replay_updates_interval = args.replay_updates_interval
-        self.replay_memory_size = args.replay_memory_size
-        self.readlock = os.path.join(replay_dir, "list", "readlock_explore.npy")
-
-    def __iter__(self):
-
-        traj_old = 0
-        replay_buffer = np.array([])
-
-        while True:
-
-            # load new memory
-            fread = lock_file(self.readlock)
-            traj_sorted = np.load(fread)
-            fread.seek(0)
-            np.save(fread, [])
-            release_file(fread)
-
-            if not len(traj_sorted):
-                continue
-
-            replay = np.concatenate(
-                [np.load(os.path.join(self.trajectory_dir, "%d.npy" % traj)) for traj in traj_sorted],
-                axis=0)
-
-            replay_buffer = np.concatenate([replay_buffer, replay], axis=0)[-self.replay_memory_size:]
-
-            # save previous traj_old to file
-            np.save(self.list_old_path, np.array([traj_old]))
-            traj_old = replay_buffer[0]['traj']
-            print("Old trajectory: %d" % traj_old)
-            print("New Sample size is: %d" % len(replay))
-
-            len_replay_buffer = len(replay_buffer)
-
-            minibatches = min(self.replay_updates_interval, int(len_replay_buffer / self.batch))
-            shuffle_indexes = np.random.choice(len_replay_buffer, minibatches * self.batch, replace=False)
-
-            print("Explorer:Replay Buffer size is: %d" % len_replay_buffer)
-
-            for i in range(minibatches):
-                yield replay_buffer[shuffle_indexes[i * self.batch:(i + 1) * self.batch]]
-
-    def __len__(self):
-        return np.inf
+DQNBatchSampler = ObservationsBatchSampler
 

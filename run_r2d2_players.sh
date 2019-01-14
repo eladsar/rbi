@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 identifier=$1
-resume=$2
-game=$3
+game=$2
+resume=$3
 
 args="--n-steps=3 --no-reward-shape --no-dropout --no-infinite-horizon --target=tde \
 --batch=32 --seq-length=30 --burn-in=10 --seq-overlap=10 \

@@ -48,8 +48,8 @@ parser.add_argument('--n-steps', type=int, default=6, metavar='STEPS', help='Num
 
 # my models parameters (Elad)
 boolean_feature("dropout", False, "Use Dropout layer")
-boolean_feature("reward-shape", True, "Shape reward with sign(r)*log(1+|r|)")
-boolean_feature("infinite-horizon", True, "Don't end episode in EOL")
+boolean_feature("reward-shape", False, "Shape reward with sign(r)*log(1+|r|)")
+boolean_feature("infinite-horizon", False, "Don't end episode in EOL")
 boolean_feature("frame-limit", True, "Limit episode frames")
 parser.add_argument('--target', type=str, default='tde', help='Target method [td|tde|mc]')
 
@@ -73,9 +73,9 @@ parser.add_argument('--hidden-features', type=int, default=512, metavar='N', hel
 parser.add_argument('--hidden-features-rnn', type=int, default=512, metavar='N', help='Number of hidden features in (RNN output)')
 parser.add_argument('--play-episodes-interval', type=int, default=16, metavar='N', help='Number of episodes between net updates')
 
-parser.add_argument('--clip', type=float, default=0, metavar='VALUE', help='Reward clipping (0 to disable)')
+parser.add_argument('--clip', type=float, default=1, metavar='VALUE', help='Reward clipping (0 to disable)')
 parser.add_argument('--discount', type=float, default=0.99, metavar='γ', help='Discount factor')
-parser.add_argument('--termination-reward', type=float, default=0, help='Reward for terminal state')
+parser.add_argument('--termination-reward', type=float, default=-1, help='Reward for terminal state')
 parser.add_argument('--friction-reward', type=float, default=0, help='Negative friction reward')
 
 parser.add_argument('--priority-alpha', type=float, default=0.5, metavar='α', help='Attenuation factor for the prioritized replay distribution')
@@ -97,7 +97,7 @@ parser.add_argument('--epsilon-post', type=float, default=0.00164, metavar='ε',
 parser.add_argument('--temperature-soft', type=float, default=2, metavar='ε', help='temperature parameter for random exploration')
 
 # dataloader
-parser.add_argument('--cpu-workers', type=int, default=64, help='How many CPUs will be used for the data loading')
+parser.add_argument('--cpu-workers', type=int, default=24, help='How many CPUs will be used for the data loading')
 parser.add_argument('--cuda-default', type=int, default=0, help='Default GPU')
 
 # train parameters
@@ -220,7 +220,8 @@ class Consts(object):
     rec_type = np.dtype([('fr', np.int), ('a', np.int), ('pi', np.float32, len(np.nonzero(actions[args.game])[0])),
                              ('h_beta', np.float32, args.hidden_features_rnn), ('h_q', np.float32, args.hidden_features_rnn),
                              ('ep', np.int), ('t', np.float32), ('fr_s', np.int), ('fr_e', np.int),
-                             ('r', np.float32), ('rho_v', np.float32), ('rho_q', np.float32), ('traj', np.int), ('tde', np.float32)])
+                             ('r', np.float32), ('rho_v', np.float32), ('rho_q', np.float32), ('traj', np.int),
+                             ('tde', np.float32), ('aux', np.float32)])
 
 
 consts = Consts()

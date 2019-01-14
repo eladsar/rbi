@@ -124,7 +124,8 @@ class RBIAgent(Agent):
         self.value_net.train()
 
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
-                   'a_player': [], 'loss_std': [], 'mc_val': [], "Hbeta": [], "Hpi": [], "adv_a": [], "q_a": []}
+                   'a_player': [], 'loss_std': [],
+                   'mc_val': [], "Hbeta": [], "Hpi": [], "adv_a": [], "q_a": [], 'image': []}
 
         # tic = time.time()
 
@@ -133,9 +134,10 @@ class RBIAgent(Agent):
             s = sample['s'].to(self.device)
             a = sample['a'].to(self.device).unsqueeze_(1)
             r = sample['r'].to(self.device)
-            rho = sample['rho'].to(self.device)
+            rho_v = sample['rho_v'].to(self.device)
+            rho_q = sample['rho_q'].to(self.device)
             pi = sample['pi'].to(self.device)
-            aux = sample['aux'].to(self.device)
+            aux = sample['aux'].to(self.device).unsqueeze_(1)
 
             # Behavioral nets
             beta = self.beta_net(s, aux)
@@ -150,19 +152,14 @@ class RBIAgent(Agent):
             adv_eval = adv_eval.detach()
 
             is_value = (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
-            # is_value = ((r - q_a_eval).abs() + 0.001) ** self.priority_beta
             is_value = is_value / is_value.mean()
 
-            # beta = 0.9 * beta + 0.1 * self.pi_rand_batch
             beta_mix = (1 - self.entropy_loss) * beta + self.entropy_loss / self.action_space
             std_q = ((beta_mix * adv_eval ** 2).sum(dim=1)) ** 0.5
             is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** self.priority_beta
             is_policy = is_policy / is_policy.mean()
-            # is_policy = 1
 
-            rho = torch.clamp(rho, 0, 1)
-            # rho = torch.clamp(rho, 1, 1)
-            loss_value = ((v_eval * (1 - rho[:, 0]) + v * rho[:, 0] + adv_a - r) ** 2 * is_value * rho[:, 1]).mean()
+            loss_value = ((v_eval * (1 - rho_v) + v * rho_v + adv_a - r) ** 2 * is_value * rho_q).mean()
 
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
             # Learning part
@@ -174,9 +171,6 @@ class RBIAgent(Agent):
             self.optimizer_value.zero_grad()
             loss_value.backward()
             self.optimizer_value.step()
-
-            # time.sleep(max(0, self.min_loop - (time.time() - tic)))
-            # tic = time.time()
 
             # collect actions statistics
 
@@ -194,7 +188,7 @@ class RBIAgent(Agent):
                 Hpi = -(pi * pi_log).sum(dim=1)
                 Hbeta = -(beta_soft * beta_log).sum(dim=1)
 
-                adv_a = rho.data.cpu().numpy()
+                adv_a = rho_q.data.cpu().numpy()
                 q_a = q_a.data.cpu().numpy()
                 r = r.data.cpu().numpy()
 
@@ -230,6 +224,7 @@ class RBIAgent(Agent):
                     results['q_a'] = np.concatenate(results['q_a'])
                     results['a_player'] = np.concatenate(results['a_player'])
                     results['mc_val'] = np.concatenate(results['mc_val'])
+                    results['image'] = s[0, :-1, :, :].data.cpu()
 
                     yield results
                     self.beta_net.train()
@@ -511,8 +506,10 @@ class RBIAgent(Agent):
 
                 env = mp_env[i]
                 cv2.imwrite(os.path.join(image_dir[i], "%s.png" % str(self.frame)), mp_env[i].image, [imcompress, compress_level])
-                episode[i].append({"fr": self.frame, "a": a, "r": 0, "pi": pi[i], "rho": 0,
-                                   "aux": aux_np[i], "ep": episode_num[i], "t": 0})
+                episode[i].append(np.array((self.frame, a, pi[i],
+                                            None, None,
+                                            episode_num[i], 0., 0, 0,
+                                            0., 1., 1., 0, 1., aux_np[i]), dtype=self.rec_type))
 
                 env.step(a)
 
@@ -531,16 +528,16 @@ class RBIAgent(Agent):
                     # cancel termination reward
                     rewards[i][-1][-1] -= self.termination_reward * int(env.k * self.skip >= self.max_length or env.score >= self.max_score)
                     td_val = get_expected_value(rewards[i], v_target[i], self.discount, self.n_steps)
-                    # rho_val = get_rho_is(rho[i], self.n_steps) if explore_threshold[i] >= 0 else np.ones(td_val.shape, dtype=np.float32)
                     rho_val = get_rho_is(rho[i], self.n_steps)
 
                     rho_vec = np.concatenate(rho[i])
-                    for j, record in enumerate(episode[i]):
-                        record['r'] = td_val[j]
-                        # record['rho'] = rho_val[j]
-                        record['rho'] = np.array([rho_vec[j], rho_val[j]], dtype=np.float32)
 
-                    trajectory[i] += episode[i][self.history_length-1:self.max_length]
+                    episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
+                    episode_df['r'] = td_val[self.history_length - 1:self.max_length]
+                    episode_df['rho_v'] = np.clip(rho_vec, 0, 1)[self.history_length - 1:self.max_length]
+                    episode_df['rho_q'] = np.clip(rho_val, 0, 1)[self.history_length - 1:self.max_length]
+
+                    trajectory[i].append(episode_df)
 
                     print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
                           (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), mp_trigger[i], time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
@@ -566,7 +563,7 @@ class RBIAgent(Agent):
                     image_dir[i] = os.path.join(screen_dir[i], str(episode_num[i]))
                     os.mkdir(image_dir[i])
 
-                    if len(trajectory[i]) >= self.player_replay_size:
+                    if sum([len(j) for j in trajectory[i]]) >= self.player_replay_size:
 
                         # write if enough space is available
                         if psutil.virtual_memory().available >= mem_threshold:
@@ -579,13 +576,10 @@ class RBIAgent(Agent):
                             # unlock file
                             release_file(fwrite)
 
-                            traj_to_save = trajectory[i]
-
-                            for j in range(len(traj_to_save)):
-                                traj_to_save[j]['traj'] = traj_num
+                            traj_to_save = np.concatenate(trajectory[i])
+                            traj_to_save['traj'] = traj_num
 
                             traj_file = os.path.join(trajectory_dir[i], "%d.npy" % traj_num)
-
                             np.save(traj_file, traj_to_save)
 
                             fread = lock_file(readlock[i])
