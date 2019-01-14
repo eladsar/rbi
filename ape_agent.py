@@ -119,11 +119,11 @@ class ApeAgent(Agent):
             s = sample['s'].to(self.device)
             a = sample['a'].to(self.device).unsqueeze_(1)
             r = sample['r'].to(self.device)
-            aux = sample['aux'].to(self.device)
+            aux = sample['aux'].to(self.device).unsqueeze_(1)
 
             t = sample['t'].to(self.device)
             s_tag = sample['s_tag'].to(self.device)
-            aux_tag = sample['aux_tag'].to(self.device)
+            aux_tag = sample['aux_tag'].to(self.device).unsqueeze_(1)
 
             self.dqn_net.eval()
             _, _, _, q, q_a_eval = self.dqn_net(s, a, aux)
