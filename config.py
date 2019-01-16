@@ -2,8 +2,17 @@ import argparse
 import time
 import numpy as np
 import socket
+import os
 
 parser = argparse.ArgumentParser(description='atari')
+username = os.getlogin()
+
+if "gpu" in socket.gethostname():
+    base_dir = os.path.join('/home/dsi/', username, 'data/rbi')
+elif "rey" == socket.gethostname():
+    base_dir = os.path.join('/localdata/', username, 'rbi')
+else:
+    base_dir = os.path.join('/data/', username, 'rbi_atari')
 
 
 def boolean_feature(feature, default, help):
@@ -22,15 +31,8 @@ def boolean_feature(feature, default, help):
 parser.add_argument('--game', type=str, default='nogame', help='ATARI game')
 parser.add_argument('--identifier', type=str, default='debug', help='The name of the model to use')
 parser.add_argument('--algorithm', type=str, default='rbi_rnn', help='[rbi|ppo|ape|rbi_rnn]')
+parser.add_argument('--base-dir', type=str, default=base_dir, help='Base directory for Logs and results')
 
-if "gpu" in socket.gethostname():
-    parser.add_argument('--indir', type=str, default='/dev/shm/sarafie/rbi/', help='Demonstration directory')
-    parser.add_argument('--outdir', type=str, default='/home/dsi/elad/data/rbi/results', help='Output directory')
-    parser.add_argument('--logdir', type=str, default='/home/dsi/elad/data/rbi/logs', help='Logs directory')
-else:
-    parser.add_argument('--indir', type=str, default='/dev/shm/sarafie/rbi_atari/', help='Demonstration directory')
-    parser.add_argument('--outdir', type=str, default='/data/sarafie/rbi_atari/results', help='Output directory')
-    parser.add_argument('--logdir', type=str, default='/data/sarafie/rbi_atari/logs', help='Logs directory')
 
 # booleans
 boolean_feature("load-last-model", False, 'Load the last saved model if possible')
@@ -223,6 +225,9 @@ class Consts(object):
                              ('r', np.float32), ('rho_v', np.float32), ('rho_q', np.float32), ('traj', np.int),
                              ('tde', np.float32), ('aux', np.float32)])
 
+    outdir = os.path.join(base_dir, 'results')
+    logdir = os.path.join(base_dir, 'logs')
+    indir = os.path.join('/dev/shm/', username, 'rbi')
+
 
 consts = Consts()
-

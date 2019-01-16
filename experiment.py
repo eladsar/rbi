@@ -28,7 +28,7 @@ class Experiment(object):
 
         # parameters
 
-        dirs = os.listdir(args.outdir)
+        dirs = os.listdir(consts.outdir)
 
         self.load_model = args.load_last_model or args.load_best_model
         self.load_best = args.load_best_model
@@ -57,8 +57,8 @@ class Experiment(object):
             self.exp_num = n
 
         # init experiment parameters
-        self.root = os.path.join(args.outdir, self.exp_name)
-        self.indir = args.indir
+        self.root = os.path.join(consts.outdir, self.exp_name)
+        self.indir = consts.indir
 
         # set dirs
         self.tensorboard_dir = os.path.join(self.root, 'tensorboard')
