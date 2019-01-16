@@ -25,6 +25,7 @@ imcompress = cv2.IMWRITE_PNG_COMPRESSION
 compress_level = 2
 mem_threshold = consts.mem_threshold
 
+
 class ApeAgent(Agent):
 
     def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
