@@ -4,12 +4,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import time
 import scipy.interpolate as interp
-import torch
 from matplotlib.ticker import FuncFormatter
 
 run_time = time.strftime("%y%m%d_%H%M%S")
 
-root_dir = os.path.abspath("./rbi/")
+root_dir = os.path.abspath("/home/elad/Dropbox/projects/deeprl/results/final_rbi/rbi/")
 
 reroute_experiment_dict = {"breakout": "breakout_no_mix_exp_0000_20180828_183917",
                            "enduro": "enduro_no_is_exp_0000_20180806_082648",
@@ -44,6 +43,23 @@ ape_experiment_dict = {"breakout": "breakout_ape_exp_0003_20180811_202933",
                         # "berzerk": "berzerk_boltz_expape_exp_0001_20180821_231355",
                        "asterix": "asterix_ape_exp_0000_20180809_175422",
                        "frostbite": "frostbite_ape_exp_0000_20180813_081751",
+                       }
+
+reroute_mini_dict = {"mspacman": "mspacman_no_mix_exp_0000_20180828_163722",
+                       "qbert": "qbert_m_3p8_exp_0001_20180827_135148",
+                       "spaceinvaders": "spaceinvaders_no_is_exp_0002_20180805_215111",
+                       # "berzerk": "berzerk_v_scale_exp_0000_20180825_213327",
+                       "icehockey": "icehockey_m_3p8_exp_0001_20180827_135203",
+                       }
+
+
+
+
+ape_mini_dict = {      "mspacman": "mspacman_ape_exp_0000_20180812_162120",
+                       "qbert": "qbert_ape_exp_0002_20180810_103813",
+                       "spaceinvaders": "spaceinvaders_ape_exp_0019_20180811_205801",
+                       # "berzerk": "berzerk_ape_exp_0000_20180814_032425",
+                       "icehockey": "icehockey_ape_exp_0000_20180811_064621",
                        }
 
 
@@ -101,14 +117,44 @@ def convert_to_dataframe(experiment):
 
 def preprocess(df):
 
-    idx = pd.RangeIndex(0, 3125000, 100)
+    # idx = pd.RangeIndex(0, 3125000, 100)
+    idx = pd.RangeIndex(0, 3000000, 100)
+
+    df = df[df['n'] <= 3000000]
+
     df = df.sort_values("n")
-    df = df.groupby("n").mean().reset_index()
-    df = df.set_index("n")
+    df = df.groupby("n").mean()
+    df = df.reset_index().set_index("n")
     df.reindex(idx)
     df = df.interpolate()
     df = df.rolling(300, win_type='blackmanharris', min_periods=1, center=True).mean()
     return df
+
+
+def preprocess_quantiles(df):
+
+    # idx = pd.RangeIndex(0, 3125000, 100)
+    idx = pd.RangeIndex(0, 3000000, 100)
+
+    df = df[df['n'] <= 3000000]
+
+    df = df.sort_values("n")
+    df = df.groupby("n").mean()
+    df = df.reset_index()
+    df = df.set_index("n")
+    df.reindex(idx)
+    df = df.interpolate()
+
+    # df_u = df_u.interpolate()
+    df_u = df.rolling(100, min_periods=1, center=True).quantile(0.75, interpolation='linear')
+    # df_u = df.rolling(10, win_type='blackmanharris', min_periods=1, center=True).quantile(0.75, interpolation='linear')
+
+    # df_d = df_d.interpolate()
+    # df_d = df.rolling(10, win_type='blackmanharris', min_periods=1, center=True).quantile(0.25, interpolation='linear')
+    df_d = df.rolling(100, min_periods=1, center=True).quantile(0.25, interpolation='linear')
+
+
+    return df_u, df_d
 
 
 def cumulative(df):
@@ -194,6 +240,71 @@ def plot_cumulative():
     plt.savefig("/home/elad/Dropbox/projects/deeprl/results/final_rbi/plots/cumsum_%s.pdf" % run_time, bbox_inches="tight")
 
 
+def plot_mini_charts():
+
+    plt.style.use('ggplot')
+    plt.figure(1, figsize=(9, 6))
+    plt.rc('ytick', labelsize=10)
+    plt.rc('xtick', labelsize=10)
+
+    formatter = FuncFormatter(millions)
+
+    i = 0
+    for experiment in sorted(reroute_mini_dict.keys()):
+
+        i += 1
+        if reroute_mini_dict[experiment] == "na":
+            continue
+
+        # load reroute DF
+        save_dir = os.path.join(root_dir, reroute_mini_dict[experiment], "postprocess")
+        ape_dir = os.path.join(root_dir, ape_mini_dict[experiment], "postprocess")
+
+        df_reroute = pd.read_pickle(os.path.join(save_dir, "df_reroute"))
+        df_ape = pd.read_pickle(os.path.join(ape_dir, "df_reroute"))
+
+        df_reroute_u, df_reroute_d = preprocess_quantiles(df_reroute)
+        df_ape_u, df_ape_d = preprocess_quantiles(df_ape)
+
+        df_reroute = preprocess(df_reroute)
+        df_ape = preprocess(df_ape)
+        plt.subplot(2, 2, i)
+
+        x1 = df_reroute.index
+        y1 = df_reroute.score
+
+        y1_u = df_reroute_u.score
+        y1_d = df_reroute_d.score
+
+        x2 = df_ape.index
+        y2 = df_ape.score
+
+        y2_u = df_ape_u.score
+        y2_d = df_ape_d.score
+
+        # plt.plot(x2, y2, x1, y1, label=experiment)
+        plt.plot(x2, y2, label="Ape-X")
+        ax = plt.gca()
+        ax.fill_between(x2, y2_u, y2_d, alpha=0.5)
+        plt.plot(x1, y1, label="RBI")
+        ax = plt.gca()
+        ax.fill_between(x1, y1_u, y1_d, alpha=0.5)
+        # plt.plot(x, std / y.abs(), label=experiment)
+        plt.title(experiment, fontsize=14)
+        if i > 2:
+            plt.xticks([0, 1e6, 2e6, 3e6], ["0", "1M", "2M", "3M"])
+            plt.xlabel("Minibatches (# of backward passes)")
+        else:
+            plt.xticks([0, 1e6, 2e6, 3e6], ["", "", "", ""])
+
+        if i == 1:
+            plt.legend(loc='lower right', prop={'size': 14})
+        ax.yaxis.set_major_formatter(formatter)
+
+    # plt.show()
+    plt.savefig("/home/elad/Dropbox/projects/deeprl/results/final_rbi/plots/mini_reroute_%s.pdf" % run_time, bbox_inches="tight")
+
+
 def plot_charts():
 
     plt.style.use('ggplot')
@@ -217,6 +328,9 @@ def plot_charts():
         df_reroute = pd.read_pickle(os.path.join(save_dir, "df_reroute"))
         df_ape = pd.read_pickle(os.path.join(ape_dir, "df_reroute"))
 
+        df_reroute_u, df_reroute_d = preprocess_quantiles(df_reroute)
+        df_ape_u, df_ape_d = preprocess_quantiles(df_ape)
+
         df_reroute = preprocess(df_reroute)
         df_ape = preprocess(df_ape)
         plt.subplot(2, 6, i)
@@ -224,16 +338,22 @@ def plot_charts():
         x1 = df_reroute.index
         y1 = df_reroute.score
 
+        y1_u = df_reroute_u.score
+        y1_d = df_reroute_d.score
+
         x2 = df_ape.index
         y2 = df_ape.score
-        # y = df_reroute.score.rolling(100, win_type='triang', min_periods=1, center=True).mean()
 
-        std = df_reroute.score.rolling(100).std()
+        y2_u = df_ape_u.score
+        y2_d = df_ape_d.score
 
-        ax = plt.gca()
         # plt.plot(x2, y2, x1, y1, label=experiment)
         plt.plot(x2, y2, label="Ape-X")
+        ax = plt.gca()
+        ax.fill_between(x2, y2_u, y2_d, alpha=0.5)
         plt.plot(x1, y1, label="RBI")
+        ax = plt.gca()
+        ax.fill_between(x1, y1_u, y1_d, alpha=0.5)
         # plt.plot(x, std / y.abs(), label=experiment)
         plt.title(experiment, fontsize=8)
         if i > 6:
@@ -375,6 +495,8 @@ def millions(x, pos):
 
 def deterministic_policies():
 
+    import torch
+
     action_space = 18
     n_steps = 200
 
@@ -459,13 +581,14 @@ def main():
 
     # deterministic_policies()
 
-    for experiment in os.listdir(root_dir):
-        convert_to_dataframe(experiment)
+    # for experiment in os.listdir(root_dir):
+    #     convert_to_dataframe(experiment)
 
-    # plot_charts()
+    plot_charts()
+    # plot_mini_charts()
     # plot_time()
     # plot_cumulative()
-    ablation_test()
+    # ablation_test()
     print("end of script")
 
 

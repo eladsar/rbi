@@ -86,7 +86,7 @@ parser.add_argument('--priority-eta', type=float, default=0.9, metavar='η', hel
 parser.add_argument('--epsilon-a', type=float, default=0.001, metavar='ε', help='Priority replay epsilon-a')
 parser.add_argument('--cmin', type=float, default=0.1, metavar='c_min', help='Lower reroute threshold')
 parser.add_argument('--cmax', type=float, default=2, metavar='c_max', help='Upper reroute threshold')
-parser.add_argument('--delta', type=float, default=0.2, metavar='delta', help='Total variation constraint')
+parser.add_argument('--delta', type=float, default=0.1, metavar='delta', help='Total variation constraint')
 
 parser.add_argument('--player', type=str, default='reroutetv', help='Player type: [reroute/tv]')
 
