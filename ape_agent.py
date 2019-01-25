@@ -120,24 +120,22 @@ class ApeAgent(Agent):
             s = sample['s'].to(self.device)
             a = sample['a'].to(self.device).unsqueeze_(1)
             r = sample['r'].to(self.device)
-            aux = sample['aux'].to(self.device).unsqueeze_(1)
 
             t = sample['t'].to(self.device)
             s_tag = sample['s_tag'].to(self.device)
-            aux_tag = sample['aux_tag'].to(self.device).unsqueeze_(1)
 
             self.dqn_net.eval()
-            _, _, _, q, q_a_eval = self.dqn_net(s, a, aux)
+            _, _, _, q, q_a_eval = self.dqn_net(s, a)
             q_a_eval = q_a_eval.detach()
 
-            _, _, _, q_tag_eval, _ = self.dqn_net(s_tag, self.a_zeros_batch, aux_tag)
+            _, _, _, q_tag_eval, _ = self.dqn_net(s_tag, self.a_zeros_batch)
             q_tag_eval = q_tag_eval.detach()
             self.dqn_net.train()
 
-            _, _, _, q_tag_target, _ = target_net(s_tag, self.a_zeros_batch, aux_tag)
+            _, _, _, q_tag_target, _ = target_net(s_tag, self.a_zeros_batch)
             q_tag_target = q_tag_target.detach()
 
-            _, _, _, _, q_a = self.dqn_net(s, a, aux)
+            _, _, _, _, q_a = self.dqn_net(s, a)
 
             a_tag = torch.argmax(q_tag_eval, dim=1).unsqueeze(1)
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(q_tag_target.gather(1, a_tag).squeeze(1)))

@@ -12,10 +12,10 @@ import socket
 
 from model import BehavioralNet, DuelNet
 
-from memory import ObservationsMemory, ObservationsBatchSampler
+from memory import ObservationsMemory, ObservationsBatchSampler, DQNMemory
 from agent import Agent
 from environment import Env
-from preprocess import get_expected_value, _get_mc_value, release_file, lock_file, get_rho_is
+from preprocess import get_expected_value, _get_mc_value, h_torch, hinv_torch, release_file, lock_file, get_tde_value
 import cv2
 import os
 import time
@@ -63,7 +63,7 @@ class RBIAgent(Agent):
 
             # self.target_net = DuelNet().to(self.device)
             # datasets
-            self.train_dataset = ObservationsMemory(root_dir)
+            self.train_dataset = DQNMemory(root_dir)
             self.train_sampler = ObservationsBatchSampler(root_dir)
             self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_sampler=self.train_sampler,
                                                             num_workers=args.cpu_workers, pin_memory=True, drop_last=False)
@@ -123,6 +123,10 @@ class RBIAgent(Agent):
         self.beta_net.train()
         self.value_net.train()
 
+        target_net = DuelNet().to(self.device)
+        target_net.load_state_dict(self.value_net.state_dict())
+        target_net.eval()
+
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
                    'a_player': [], 'loss_std': [],
                    'mc_val': [], "Hbeta": [], "Hpi": [], "adv_a": [], "q_a": [], 'image': []}
@@ -134,22 +138,29 @@ class RBIAgent(Agent):
             s = sample['s'].to(self.device)
             a = sample['a'].to(self.device).unsqueeze_(1)
             r = sample['r'].to(self.device)
-            rho_v = sample['rho_v'].to(self.device)
-            rho_q = sample['rho_q'].to(self.device)
             pi = sample['pi'].to(self.device)
-            aux = sample['aux'].to(self.device).unsqueeze_(1)
+
+            t = sample['t'].to(self.device)
+            s_tag = sample['s_tag'].to(self.device)
 
             # Behavioral nets
-            beta = self.beta_net(s, aux)
+            beta = self.beta_net(s)
             beta_log = F.log_softmax(beta, dim=1)
 
             beta = F.softmax(beta.detach(), dim=1)
-            v, adv_eval, adv_a, _, q_a = self.value_net(s, a, beta, aux)
+            v, adv_eval, adv_a, _, q_a = self.value_net(s, a, beta)
+
+            beta_tag = self.beta_net(s_tag)
+            beta_tag = F.softmax(beta_tag.detach(), dim=1)
+            v_target, _, _, _, _ = target_net(s_tag, a, beta_tag)
 
             v = v.squeeze(1)
+            v_target = v_target.squeeze(1).detach()
             v_eval = v.detach()
             q_a_eval = q_a.detach()
             adv_eval = adv_eval.detach()
+
+            r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(v_target))
 
             is_value = (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
             is_value = is_value / is_value.mean()
@@ -159,8 +170,7 @@ class RBIAgent(Agent):
             is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** self.priority_beta
             is_policy = is_policy / is_policy.mean()
 
-            loss_value = ((v_eval * (1 - rho_v) + v * rho_v + adv_a - r) ** 2 * is_value * rho_q).mean()
-
+            loss_value = ((q_a - r) ** 2 * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
             # Learning part
 
@@ -188,7 +198,7 @@ class RBIAgent(Agent):
                 Hpi = -(pi * pi_log).sum(dim=1)
                 Hbeta = -(beta_soft * beta_log).sum(dim=1)
 
-                adv_a = rho_q.data.cpu().numpy()
+                adv_a = r.data.cpu().numpy()
                 q_a = q_a.data.cpu().numpy()
                 r = r.data.cpu().numpy()
 
@@ -216,6 +226,10 @@ class RBIAgent(Agent):
                 if not (n + 1 + self.n_offset) % self.update_memory_interval:
                     # save agent state
                     self.save_checkpoint(self.snapshot_path, {'n': self.n_offset + n + 1})
+
+                if not (n+1) % self.update_target_interval:
+                    # save agent state
+                    target_net.load_state_dict(self.value_net.state_dict())
 
                 if not (n + 1 + self.n_offset) % n_interval:
                     results['act_diff'] = np.concatenate(results['act_diff'])
@@ -299,12 +313,12 @@ class RBIAgent(Agent):
                 # get aux data
                 aux = self.env.aux.to(self.device)
 
-                beta = self.beta_net(s, aux)
+                beta = self.beta_net(s)
                 beta = F.softmax(beta.detach(), dim=1)
 
                 # take q as adv
 
-                v, adv, _, q, _ = self.value_net(s, self.a_zeros, beta, aux)
+                v, adv, _, q, _ = self.value_net(s, self.a_zeros, beta)
 
                 q = q.squeeze(0).data.cpu().numpy()
                 v_expected = v.squeeze(0).data.cpu().numpy()
@@ -385,8 +399,6 @@ class RBIAgent(Agent):
 
         player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
 
-        explore_threshold = player_i
-
         mp_explore = 0.4 ** (1 + 7 * (1 - player_i))
 
         mp_env = [Env() for _ in range(n_players)]
@@ -440,10 +452,10 @@ class RBIAgent(Agent):
             aux = torch.cat([env.aux for env in mp_env]).to(self.device)
             aux_np = aux.cpu().numpy().astype(np.float32)
 
-            beta = self.beta_net(s, aux)
+            beta = self.beta_net(s)
             beta = F.softmax(beta.detach(), dim=1)
             # take q as adv
-            v_expected, adv, _, q, _ = self.value_net(s, a_zeros_mp, beta, aux)
+            v_expected, adv, _, q, _ = self.value_net(s, a_zeros_mp, beta)
 
             q = q.data.cpu().numpy()
             beta = beta.data.cpu().numpy()
@@ -454,11 +466,7 @@ class RBIAgent(Agent):
             rank = np.argsort(adv, axis=1)
             adv_rank = np.argsort(rank, axis=1).astype(np.float)
 
-            mp_trigger = np.logical_and(
-                np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
-                explore_threshold >= 0)
-
-            exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
+            exploration = np.repeat(np.expand_dims(mp_explore, axis=1), self.action_space, axis=1)
 
             if self.n_offset >= self.random_initialization:
 
@@ -527,20 +535,17 @@ class RBIAgent(Agent):
 
                     # cancel termination reward
                     rewards[i][-1][-1] -= self.termination_reward * int(env.k * self.skip >= self.max_length or env.score >= self.max_score)
-                    td_val = get_expected_value(rewards[i], v_target[i], self.discount, self.n_steps)
-                    rho_val = get_rho_is(rho[i], self.n_steps)
 
-                    rho_vec = np.concatenate(rho[i])
+                    td_val, t_val = get_tde_value(rewards[i], self.discount, self.n_steps)
 
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
-                    episode_df['rho_v'] = np.clip(rho_vec, 0, 1)[self.history_length - 1:self.max_length]
-                    episode_df['rho_q'] = np.clip(rho_val, 0, 1)[self.history_length - 1:self.max_length]
+                    episode_df['t'] = t_val[self.history_length - 1:self.max_length]
 
                     trajectory[i].append(episode_df)
 
                     print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
-                          (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), mp_trigger[i], time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
+                          (self.frame, env.score, env.k, mp_explore[i], 0, 0, time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
 
                     env.reset()
                     episode[i] = []
@@ -548,7 +553,6 @@ class RBIAgent(Agent):
                     rho[i] = [[]]
                     v_target[i] = [[]]
                     lives[i] = env.lives
-                    mp_trigger[i] = 0
 
                     # get new episode number
 
@@ -662,11 +666,11 @@ class RBIAgent(Agent):
                 s = self.env.s.to(self.device)
                 aux = self.env.aux.to(self.device)
 
-                beta = self.beta_net(s, aux)
+                beta = self.beta_net(s)
 
                 beta_softmax = F.softmax(beta, dim=1)
 
-                v, adv, _, q, _ = self.value_net(s, self.a_zeros, beta_softmax, aux)
+                v, adv, _, q, _ = self.value_net(s, self.a_zeros, beta_softmax)
                 v = v.squeeze(0)
                 adv = adv.squeeze(0)
                 q = q.squeeze(0).data.cpu().numpy()

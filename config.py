@@ -96,7 +96,7 @@ parser.add_argument('--ppo-eps', type=float, default=0.1, metavar='ε', help='PP
 parser.add_argument('--explore-threshold', type=float, default=0.0, metavar='t', help='Threshold score for exploration')
 parser.add_argument('--epsilon-pre', type=float, default=0.00164, metavar='ε', help='exploration parameter before behavioral period')
 parser.add_argument('--epsilon-post', type=float, default=0.00164, metavar='ε', help='exploration parameter after behavioral period')
-parser.add_argument('--temperature-soft', type=float, default=2, metavar='ε', help='temperature parameter for random exploration')
+parser.add_argument('--temperature-soft', type=float, default=0, metavar='ε', help='temperature parameter for random exploration')
 
 # dataloader
 parser.add_argument('--cpu-workers', type=int, default=24, help='How many CPUs will be used for the data loading')

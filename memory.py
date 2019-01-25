@@ -126,7 +126,7 @@ class DQNMemory(Memory):
         else:
             s_tag = np.zeros((4, 84, 84), dtype=np.float32)
 
-        return {'s': s, 'r': sample['r'], 'a': sample['a'], 't': sample['t'],
+        return {'s': s, 'r': sample['r'], 'a': sample['a'], 't': sample['t'], 'pi': sample['pi'],
                 'aux': sample['aux'], 's_tag': s_tag, 'aux_tag': sample['aux']}
 
 
