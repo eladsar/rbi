@@ -65,22 +65,16 @@ copy ncurses.tar.gz and tmx-2.5.tar.gz to tmux_tmp directory
 copy install_tmux.sh to server and run
 ./install_tmux.sh
 
-Install Pytorch 0.4.1, pandas matplotlib numpy opencv (cv2), tensorboardx:
-
-conda install -c pytorch pytorch
-conda install -c anaconda pandas 
-conda install -c conda-forge matplotlib 
-conda install -c anaconda numpy
-conda install -c menpo opencv 
-conda install -c conda-forge tensorboardx 
-
-pip install comet_ml
-pip install parse
-pip install atari_py
-
 mkdir -p data/rbi/results
 mkdir -p data/rbi/logs
 
 mkdir -p ~/projects/rbi
 cd ~/projects/rbi
+
+conda env create -f environment.yml
+source activate torch
+
+pip install atari-py
+
+
 
