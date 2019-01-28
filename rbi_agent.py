@@ -220,16 +220,15 @@ class RBIAgent(Agent):
                 pi /= pi.sum(dim=1).unsqueeze(1).repeat(1, self.action_space)
 
                 pi_log = pi.log()
-                beta_soft = F.softmax(beta, dim=1).detach()
 
                 Hpi = -(pi * pi_log).sum(dim=1)
-                Hbeta = -(beta_soft * beta_log).sum(dim=1)
+                Hbeta = -(beta * beta_log).sum(dim=1)
 
                 adv_a = r.data.cpu().numpy()
                 q_a = q_a.data.cpu().numpy()
                 r = r.data.cpu().numpy()
 
-                _, beta_index = beta_soft.data.cpu().max(1)
+                _, beta_index = beta.data.cpu().max(1)
                 beta_index = beta_index.numpy()
                 act_diff = (a_index_np != beta_index).astype(np.int)
 
