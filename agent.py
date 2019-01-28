@@ -23,10 +23,7 @@ class Agent(object):
         self.cmax = args.cmax
         self.history_length= args.history_length
         self.random_initialization = args.random_initialization
-        self.eps_post = args.epsilon_post * self.action_space / (self.action_space - 1)
-        self.eps_pre = args.epsilon_pre * self.action_space / (self.action_space - 1)
-        self.temp_soft = args.temperature_soft
-        self.off = True if max(args.epsilon_post, args.epsilon_pre) > 0 else False
+        self.epsilon = args.epsilon * self.action_space / (self.action_space - 1)
         self.delta = args.delta
         self.player = args.player
         self.priority_beta = args.priority_beta
@@ -38,8 +35,6 @@ class Agent(object):
         self.entropy_loss = float((1 - (1 / (1 + (self.action_space - 1) * np.exp(-args.softmax_diff)))) * (self.action_space / (self.action_space - 1)))
         self.batch = args.batch
         self.replay_memory_size = args.replay_memory_size
-        self.explore_threshold = args.explore_threshold
-        self.ppo_eps = args.ppo_eps
         self.n_actors = args.n_actors
         self.actor_index = args.actor_index
         self.n_players = args.n_players
@@ -86,8 +81,32 @@ class Agent(object):
     def evaluate(self, n_interval, n_tot):
         raise NotImplementedError
 
-    def play(self, n_tot):
-        raise NotImplementedError
+    def set_player(self, player, cmin=None, cmax=None, delta=None,
+                   epsilon=None, behavioral_avg_score=None,
+                   behavioral_avg_frame=None, explore_threshold=None):
+
+        self.player = player
+
+        if epsilon is not None:
+            self.epsilon = epsilon * self.action_space / (self.action_space - 1)
+
+        if cmin is not None:
+            self.cmin = cmin
+
+        if cmax is not None:
+            self.cmax = cmax
+
+        if delta is not None:
+            self.delta = delta
+
+        if explore_threshold is not None:
+            self.explore_threshold = explore_threshold
+
+        if behavioral_avg_score is not None:
+            self.behavioral_avg_score = behavioral_avg_score
+
+        if behavioral_avg_frame is not None:
+            self.behavioral_avg_frame = behavioral_avg_frame
 
     def resume(self, model_path):
         aux = self.load_checkpoint(model_path)

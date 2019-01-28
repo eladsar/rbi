@@ -65,6 +65,7 @@ class ObservationsBatchSampler(object):
         self.readlock = os.path.join(replay_dir, "list", "readlock_explore.npy")
 
         self.rec_type = consts.rec_type
+        self.n_steps = args.n_steps
 
     def __iter__(self):
 
@@ -96,14 +97,14 @@ class ObservationsBatchSampler(object):
 
             len_replay_buffer = len(replay_buffer)
 
-            minibatches = min(self.replay_updates_interval, int(len_replay_buffer / self.batch))
-            shuffle_indexes = np.random.choice(len_replay_buffer, (minibatches, self.batch), replace=False)
+            minibatches = min(self.replay_updates_interval, int(len_replay_buffer / self.batch) - self.n_steps)
+            shuffle_indexes = np.random.choice(len_replay_buffer - self.n_steps, (minibatches, self.batch), replace=False)
 
             print("Explorer:Replay Buffer size is: %d" % len_replay_buffer)
 
             for i in range(minibatches):
                 samples = shuffle_indexes[i]
-                yield replay_buffer[samples]
+                yield zip(replay_buffer[samples], replay_buffer[samples + self.n_steps])
 
     def __len__(self):
         return np.inf
@@ -118,16 +119,20 @@ class DQNMemory(Memory):
 
     def __getitem__(self, sample):
 
+        sample, next_sample = sample
+
         episode_dir = os.path.join(self.screen_dir, str(sample['ep']))
         s = self.preprocess_history(episode_dir, sample['fr'])
 
         if not sample['t']:
-            s_tag = self.preprocess_history(episode_dir, sample['fr']+self.n_steps)
+            s_tag = self.preprocess_history(episode_dir, next_sample['fr'])
         else:
             s_tag = np.zeros((4, 84, 84), dtype=np.float32)
 
-        return {'s': s, 'r': sample['r'], 'a': sample['a'], 't': sample['t'], 'pi': sample['pi'],
-                'aux': sample['aux'], 's_tag': s_tag, 'aux_tag': sample['aux']}
+        return s, s_tag, sample['a'], sample['r'], sample['t'], sample['pi'], next_sample['pi']
+
+        # return {'s': s, 'r': sample['r'], 'a': sample['a'], 't': sample['t'], 'pi': sample['pi'],
+        #         's_tag': s_tag, 'pi_tag': next_sample['pi']}
 
 
 DQNBatchSampler = ObservationsBatchSampler

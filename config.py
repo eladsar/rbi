@@ -43,7 +43,6 @@ boolean_feature("play", False, 'Test the learned model via playing')
 boolean_feature("multiplay", False, 'Send samples to memory from multiple parallel players')
 boolean_feature("choose", False, 'Choose best player')
 boolean_feature("clean", False, 'Clean old trajectories')
-boolean_feature("comet", False, "Log results to comet")
 boolean_feature("tensorboard", True, "Log results to tensorboard")
 boolean_feature("log-scores", True, "Log score results to NPY objects")
 parser.add_argument('--n-steps', type=int, default=6, metavar='STEPS', help='Number of steps for multi-step learning')
@@ -86,17 +85,13 @@ parser.add_argument('--priority-eta', type=float, default=0.9, metavar='η', hel
 parser.add_argument('--epsilon-a', type=float, default=0.001, metavar='ε', help='Priority replay epsilon-a')
 parser.add_argument('--cmin', type=float, default=0.1, metavar='c_min', help='Lower reroute threshold')
 parser.add_argument('--cmax', type=float, default=2, metavar='c_max', help='Upper reroute threshold')
-parser.add_argument('--delta', type=float, default=0.2, metavar='delta', help='Total variation constraint')
+parser.add_argument('--delta', type=float, default=0.1, metavar='delta', help='Total variation constraint')
 
 parser.add_argument('--player', type=str, default='reroutetv', help='Player type: [reroute/tv]')
 
 # exploration parameters
 parser.add_argument('--softmax-diff', type=float, default=3.8, metavar='β', help='Maximum softmax diff')
-parser.add_argument('--ppo-eps', type=float, default=0.1, metavar='ε', help='PPO epsilon level')
-parser.add_argument('--explore-threshold', type=float, default=0.0, metavar='t', help='Threshold score for exploration')
-parser.add_argument('--epsilon-pre', type=float, default=0.00164, metavar='ε', help='exploration parameter before behavioral period')
-parser.add_argument('--epsilon-post', type=float, default=0.00164, metavar='ε', help='exploration parameter after behavioral period')
-parser.add_argument('--temperature-soft', type=float, default=0, metavar='ε', help='temperature parameter for random exploration')
+parser.add_argument('--epsilon', type=float, default=0.00164, metavar='ε', help='exploration parameter before behavioral period')
 
 # dataloader
 parser.add_argument('--cpu-workers', type=int, default=24, help='How many CPUs will be used for the data loading')

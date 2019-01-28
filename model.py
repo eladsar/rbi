@@ -102,64 +102,6 @@ class BehavioralNet(nn.Module):
         return beta
 
 
-class DQN(nn.Module):
-
-    def __init__(self):
-
-        super(DQN, self).__init__()
-
-        # value net
-        self.fc_v = nn.Sequential(
-            nn.Linear(3136, 512),
-            nn.ReLU(),
-            nn.Linear(512, 1),
-        )
-
-        # advantage net
-        self.fc_adv = nn.Sequential(
-            nn.Linear(3136, 512),
-            nn.ReLU(),
-            nn.Linear(512, action_space),
-        )
-
-        # batch normalization and dropout
-        self.cnn = nn.Sequential(
-            nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-        )
-
-        # initialization
-        self.cnn[0].bias.data.zero_()
-        self.cnn[2].bias.data.zero_()
-        self.cnn[4].bias.data.zero_()
-
-    def forward(self, s, a):
-
-        # state CNN
-
-        s = self.cnn(s)
-        s = s.view(s.size(0), -1)
-
-        # behavioral estimator
-        v = self.fc_v(s)
-        adv_tilde = self.fc_adv(s)
-
-        bias = adv_tilde.mean(1).unsqueeze(1)
-        bias = bias.repeat(1, action_space)
-
-        adv = adv_tilde - bias
-
-        adv_a = adv.gather(1, a).squeeze(1)
-        q = v.repeat(1, action_space) + adv
-        q_a = q.gather(1, a).squeeze(1)
-
-        return v, adv, adv_a, q, q_a
-
-
 class HInv(torch.autograd.Function):
     """
     We can implement our own custom autograd Functions by subclassing

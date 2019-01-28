@@ -74,7 +74,6 @@ conda install -c anaconda numpy
 conda install -c menpo opencv 
 conda install -c conda-forge tensorboardx 
 
-pip install comet_ml
 pip install parse
 pip install atari_py
 

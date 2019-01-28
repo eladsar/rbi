@@ -19,10 +19,10 @@ fi
 args="--algorithm=rbi --n-steps=3 --no-reward-shape --no-dropout --no-infinite-horizon --target=td \
 --batch=128 --hidden-features=512 --clip=1 --discount=0.99 \
 --termination-reward=0 --friction-reward=0 --priority-alpha=0.5 --priority-beta=0.5 --epsilon-a=0.001 \
---epsilon-pre=0.00164 --epsilon-post=0.00164 --cpu-workers=24 \
+--epsilon=0.00164 --cpu-workers=48 \
 --update-target-interval=2500 --n-tot=3125000 --checkpoint-interval=5000 \
 --random-initialization=2500 --player-replay-size=2500 --update-memory-interval=100 \
---load-memory-interval=250 --replay-updates-interval=5000 --replay-memory-size=2000000"
+--load-memory-interval=100 --replay-updates-interval=5000 --replay-memory-size=2000000"
 
 CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=0 $args &
 CUDA_VISIBLE_DEVICES=1, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=1 $args &
@@ -46,7 +46,7 @@ CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --re
 CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=16 $args &
 CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --n-actors=18 --actor-index=17 $args &
 
-CUDA_VISIBLE_DEVICES=0, python main.py --clean --identifier=$identifier --resume=$resume --load-last-model --game=$game $args &
+CUDA_VISIBLE_DEVICES=3, python main.py --clean --identifier=$identifier --resume=$resume --load-last-model --game=$game $args &
 CUDA_VISIBLE_DEVICES=3, python main.py --choose --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --play-episodes-interval=16 --wait=150 $tensor $args &
 CUDA_VISIBLE_DEVICES=3, python main.py --choose --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --play-episodes-interval=16 --wait=300 $tensor $args &
 

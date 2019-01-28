@@ -6,7 +6,6 @@ import numpy as np
 
 from tensorboardX import SummaryWriter
 
-import comet_ml as comet
 from tqdm import tqdm
 import time
 
@@ -128,10 +127,6 @@ class Experiment(object):
 
         agent = self.choose_agent()(self.replay_dir, checkpoint=self.checkpoint)
 
-        if args.comet:
-            self.comet = comet.Experiment(api_key=consts.api_key, project_name="rbi")
-            self.comet.log_multiple_params(vars(args))
-
         # load model
         if self.load_model:
             if self.load_last:
@@ -211,10 +206,7 @@ class Experiment(object):
             player = self.get_player(agent)
             score = player['high'] if player else 0
             agent.save_checkpoint(self.checkpoint, {'n': n + n_offset, 'score': score})
-            if args.comet:
-                self.comet.log_multiple_params({"loss_beta": avg_train_loss_beta, "loss_value": avg_train_loss_v_beta,
-                                                "loss_std": avg_train_loss_std, "Hbeta": Hbeta, "Hpi": Hpi,
-                                                "act_diff": avg_act_diff})
+
 
         return agent
 
@@ -302,10 +294,6 @@ class Experiment(object):
         os.makedirs(scores_dir)
 
         kk = 0
-
-        if args.comet:
-            self.comet = comet.Experiment(api_key=consts.api_key, project_name="rbi")
-            self.comet.log_multiple_params(vars(args))
 
         if args.algorithm in ["rbi", "rbi_rnn"]:
             results = {'n': 0,
@@ -413,8 +401,6 @@ class Experiment(object):
                         pass
 
                 np.save(results_filename, results)
-                if args.comet:
-                    self.comet.log_multiple_params(results)
 
                 if self.log_scores:
                     logger.info("Save NPY file: %d_%s_%d_%s.npy" % (n, uuid, kk, player_name))

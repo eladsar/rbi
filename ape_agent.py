@@ -5,12 +5,11 @@ import torch.optim.lr_scheduler
 import numpy as np
 from tqdm import tqdm
 from torch.nn import functional as F
-from comet_ml import Experiment as comet
 import psutil
 
 from config import consts, args
 
-from model import DQN
+from model import DuelNet
 
 from memory import DQNMemory, DQNBatchSampler
 from agent import Agent
@@ -33,12 +32,12 @@ class ApeAgent(Agent):
         print("Learning with Ape Agent")
         super(ApeAgent, self).__init__(root_dir, checkpoint)
 
-        self.dqn_net = DQN().to(self.device)
+        self.dqn_net = DuelNet().to(self.device)
 
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
-        self.a_zeros_batch = self.a_zeros.repeat(self.batch, 1)
 
         self.pi_rand = np.ones(self.action_space) / self.action_space
+        self.pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(self.batch, 1).to(self.device)
 
         if player:
 
@@ -107,7 +106,7 @@ class ApeAgent(Agent):
 
         self.dqn_net.train()
 
-        target_net = DQN().to(self.device)
+        target_net = DuelNet().to(self.device)
         target_net.load_state_dict(self.dqn_net.state_dict())
         target_net.eval()
 
@@ -124,18 +123,14 @@ class ApeAgent(Agent):
             t = sample['t'].to(self.device)
             s_tag = sample['s_tag'].to(self.device)
 
-            self.dqn_net.eval()
-            _, _, _, q, q_a_eval = self.dqn_net(s, a)
-            q_a_eval = q_a_eval.detach()
-
-            _, _, _, q_tag_eval, _ = self.dqn_net(s_tag, self.a_zeros_batch)
+            _, _, _, q_tag_eval, _ = self.dqn_net(s_tag, a, self.pi_rand_batch)
             q_tag_eval = q_tag_eval.detach()
-            self.dqn_net.train()
 
-            _, _, _, q_tag_target, _ = target_net(s_tag, self.a_zeros_batch)
+            _, _, _, q_tag_target, _ = target_net(s_tag, a, self.pi_rand_batch)
             q_tag_target = q_tag_target.detach()
 
-            _, _, _, _, q_a = self.dqn_net(s, a)
+            _, _, _, _, q_a = self.dqn_net(s, a, self.pi_rand_batch)
+            q_a_eval = q_a.detach()
 
             a_tag = torch.argmax(q_tag_eval, dim=1).unsqueeze(1)
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(q_tag_target.gather(1, a_tag).squeeze(1)))
@@ -245,9 +240,9 @@ class ApeAgent(Agent):
             while not fix:
                 try:
                     self.load_checkpoint(self.snapshot_path)
+                    break
                 except:
                     time.sleep(0.5)
-                    self.load_checkpoint(self.snapshot_path)
 
             self.dqn_net.eval()
 
@@ -262,11 +257,8 @@ class ApeAgent(Agent):
                     self.dqn_net.eval()
 
                 s = self.env.s.to(self.device)
-                trigger = trigger or (self.env.score > self.behavioral_avg_score * self.explore_threshold)
                 # get aux data
-                aux = self.env.aux.to(self.device)
-
-                _, _, _, q, _ = self.dqn_net(s, self.a_zeros, aux)
+                _, _, _, q, _ = self.dqn_net(s, self.a_zeros)
 
                 q = q.squeeze(0).data.cpu().numpy()
 
@@ -276,19 +268,10 @@ class ApeAgent(Agent):
                     pi[np.argmax(q)] = 1
 
                 else:
+
                     pi = self.pi_rand
 
-                if self.off:
-
-                    if trigger:
-                        exploration = self.eps_post
-                    else:
-                        exploration = self.eps_pre
-
-                    pi_mix = exploration * self.pi_rand + (1 - exploration) * pi
-
-                else:
-                    pi_mix = pi
+                pi_mix = self.epsilon * self.pi_rand + (1 - self.epsilon) * pi
 
                 pi_mix = pi_mix.clip(0, 1)
                 pi_mix = pi_mix / pi_mix.sum()
@@ -306,12 +289,8 @@ class ApeAgent(Agent):
 
                 self.frame += 1
 
-            # tde_val, t_val = get_tde_value(rewards, self.discount, self.n_steps)
-
             mc_val = _get_mc_value(rewards, None, self.discount, None)
             q_val = np.array(q_val)
-
-            # print("mc_val: %d | q_val: %d" % (len(mc_val), len(q_val)))
 
             yield {'score': self.env.score,
                    'frames': self.env.k, "n": self.n_offset, "mc": mc_val, "q": q_val}
@@ -326,8 +305,8 @@ class ApeAgent(Agent):
         n_players = self.n_players
 
         player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
-        explore_threshold = np.zeros(self.n_players)
         mp_explore = 0.4 ** (1 + 7 * player_i)
+        exploration = np.repeat(np.expand_dims(mp_explore, axis=1), self.action_space, axis=1)
 
         mp_env = [Env() for _ in range(n_players)]
         self.frame = 0
@@ -343,6 +322,8 @@ class ApeAgent(Agent):
         screen_dir = [os.path.join(self.explore_dir, "screen")] * n_players
         trajectory_dir = [os.path.join(self.explore_dir, "trajectory")] * n_players
         readlock = [os.path.join(self.list_dir, "readlock_explore.npy")] * n_players
+
+        pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(n_players, 1).to(self.device)
 
         for i in range(n_players):
             mp_env[i].reset()
@@ -375,7 +356,7 @@ class ApeAgent(Agent):
             aux = torch.cat([env.aux for env in mp_env]).to(self.device)
             aux_np = aux.cpu().numpy().astype(np.float32)
 
-            _, _, _, q, _ = self.dqn_net(s, a_zeros_mp, aux)
+            _, _, _, q, _ = self.dqn_net(s, a_zeros_mp, pi_rand_batch)
 
             q = q.data.cpu().numpy()
 
@@ -387,8 +368,6 @@ class ApeAgent(Agent):
             else:
                 pi = mp_pi_rand
 
-            mp_trigger = np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold
-            exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger + (1 - mp_trigger) * self.eps_pre, axis=1), self.action_space, axis=1)
             pi_mix = pi * (1 - exploration) + exploration * mp_pi_rand
             pi_mix = pi_mix.clip(0, 1)
             pi_mix = pi_mix / np.repeat(np.expand_dims(pi_mix.sum(axis=1), axis=1), self.action_space, axis=1)
@@ -431,7 +410,6 @@ class ApeAgent(Agent):
                     episode[i] = []
                     rewards[i] = [[]]
                     lives[i] = env.lives
-                    mp_trigger[i] = 0
 
                     # get new episode number
 
@@ -480,49 +458,6 @@ class ApeAgent(Agent):
             if self.n_offset >= self.n_tot:
                 break
 
-    def set_player(self, player, cmin=None, cmax=None, delta=None, eps_pre=None,
-                   eps_post=None, temp_soft=None, behavioral_avg_score=None,
-                   behavioral_avg_frame=None, explore_threshold=None):
-
-        self.player = player
-
-        if eps_pre is not None:
-            self.eps_pre = eps_pre
-
-        if eps_post is not None:
-            self.eps_post = eps_post
-
-        if temp_soft is not None:
-            self.temp_soft = temp_soft
-
-
-        if cmin is not None:
-            self.cmin = cmin
-
-        if cmax is not None:
-            self.cmax = cmax
-
-        if delta is not None:
-            self.delta = delta
-
-        if explore_threshold is not None:
-            self.explore_threshold = explore_threshold
-
-        if behavioral_avg_score is not None:
-            self.behavioral_avg_score = behavioral_avg_score
-
-        if behavioral_avg_frame is not None:
-            self.behavioral_avg_frame = behavioral_avg_frame
-
-        self.off = True if max(self.eps_post, self.eps_pre) > 0 else False
-
-        if self.off:
-            self.trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-            self.screen_dir = os.path.join(self.explore_dir, "screen")
-        else:
-            self.trajectory_dir = os.path.join(self.exploit_dir, "trajectory")
-            self.screen_dir = os.path.join(self.exploit_dir, "screen")
-
     def demonstrate(self, n_tot):
 
         self.dqn_net.eval()
@@ -540,7 +475,7 @@ class ApeAgent(Agent):
                 s = self.env.s.to(self.device)
                 aux = self.env.aux.to(self.device)
 
-                v, adv, _, q, _ = self.dqn_net(s, self.a_zeros, aux)
+                v, adv, _, q, _ = self.dqn_net(s, self.a_zeros)
                 v = v.squeeze(0)
                 adv = adv.squeeze(0)
                 q = q.squeeze(0).data.cpu().numpy()
