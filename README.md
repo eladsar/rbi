@@ -79,7 +79,7 @@ cd ~/projects/rbi
 
 conda env create -f environment.yml
 
-source activate torch
+source activate torch1
 
 pip install atari-py
 
