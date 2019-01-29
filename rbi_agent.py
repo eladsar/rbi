@@ -158,26 +158,25 @@ class RBIAgent(Agent):
             beta_log = F.log_softmax(beta, dim=1)
             beta = F.softmax(beta.detach(), dim=1)
 
-            v_eval, adv_eval, _, _, q_a = self.value_net(s, a, pi)
-            v_target, _, _, _, _ = target_net(s_tag, a, pi_tag)
-
-            v_eval = v_eval.squeeze(1).detach()
-            v_target = v_target.squeeze(1).detach()
-            q_a_eval = q_a.detach()
-            adv_eval = adv_eval.detach()
-
-            # _, _, _, q, q_a = self.value_net(s, a, self.pi_rand_batch)
-            # _, _, _, q_tag, _ = target_net(s_tag, a, self.pi_rand_batch)
+            # v_eval, adv_eval, _, _, q_a = self.value_net(s, a, pi)
+            # v_target, _, _, _, _ = target_net(s_tag, a, pi_tag)
             #
-            # q = q.detach()
-            # v_eval = (q * pi).sum(dim=1).unsqueeze(1)
-            # adv_eval = q - v_eval
-            # v_eval.squeeze_(1)
+            # v_eval = v_eval.squeeze(1).detach()
+            # v_target = v_target.squeeze(1).detach()
             # q_a_eval = q_a.detach()
-            # v_target = (q_tag * pi_tag).sum(dim=1).detach()
+            # adv_eval = adv_eval.detach()
+
+            _, _, _, q, q_a = self.value_net(s, a, self.pi_rand_batch)
+            _, _, _, q_tag, _ = target_net(s_tag, a, self.pi_rand_batch)
+
+            q = q.detach()
+            v_eval = (q * pi).sum(dim=1).unsqueeze(1)
+            adv_eval = q - v_eval
+            v_eval.squeeze_(1)
+            q_a_eval = q_a.detach()
+            v_target = (q_tag * pi_tag).sum(dim=1).detach()
 
             # v, adv_eval, adv_a, _, q_a = self.value_net(s, a, beta)
-
             # beta_tag = self.beta_net(s_tag)
             # beta_tag = F.softmax(beta_tag.detach(), dim=1)
             # v_target, _, _, _, _ = target_net(s_tag, a, beta_tag)
@@ -189,12 +188,15 @@ class RBIAgent(Agent):
 
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(v_target))
 
-            is_value = (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
+            # is_value = (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
+            is_value = ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_beta
             is_value = is_value / is_value.mean()
 
             beta_mix = (1 - self.entropy_loss) * beta + self.entropy_loss / self.action_space
             std_q = ((beta_mix * adv_eval ** 2).sum(dim=1)) ** 0.5
-            is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** self.priority_beta
+
+            # is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** self.priority_beta
+            is_policy = (std_q + self.epsilon_a) ** self.priority_beta
             is_policy = is_policy / is_policy.mean()
 
             loss_value = ((q_a - r) ** 2 * is_value).mean()
