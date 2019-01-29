@@ -65,10 +65,10 @@ copy ncurses.tar.gz and tmx-2.5.tar.gz to tmux_tmp directory
 copy install_tmux.sh to server and run
 ./install_tmux.sh
 
-mkdir -p data/rbi/results
-mkdir -p data/rbi/logs
-
+mkdir -p ~/data/rbi/results
+mkdir -p ~/data/rbi/logs
 mkdir -p ~/projects/rbi
+
 cd ~/projects/rbi
 
 conda env create -f environment.yml
