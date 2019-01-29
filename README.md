@@ -66,12 +66,15 @@ copy install_tmux.sh to server and run
 ./install_tmux.sh
 
 mkdir -p ~/data/rbi/results
+
 mkdir -p ~/data/rbi/logs
+
 mkdir -p ~/projects/rbi
 
 cd ~/projects/rbi
 
 conda env create -f environment.yml
+
 source activate torch
 
 pip install atari-py
