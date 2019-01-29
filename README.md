@@ -71,13 +71,15 @@ mkdir -p ~/data/rbi/logs
 
 mkdir -p ~/projects/rbi
 
-cd ~/projects/rbi
-
 conda env create -f environment.yml
 
 source activate torch
 
 pip install atari-py
+
+cd ~/projects/rbi
+
+git clone https://github.com/eladsar/rbi.git
 
 
 
