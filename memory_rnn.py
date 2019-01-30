@@ -54,6 +54,16 @@ class MemoryRNN(torch.utils.data.Dataset):
         return imgs[self.history_mat[:k], :, :]
 
 
+# def collate_observations(batch):
+#
+#
+#
+#     return {'s': s[self.burn_in:], 'r': r[-self.seq_length:-self.n_steps], 'rho_q': rho_q[-self.seq_length:-self.n_steps],
+#                 'rho_v': rho_v[self.burn_in:], 'a': a[self.burn_in:], 'pi': pi[self.burn_in:],
+#                 'h_q': h_q, 'h_beta': h_beta, 's_bi': s[:self.burn_in], 't': t[self.burn_in:],
+#                 'tde': tde}
+
+
 class ObservationsRNNMemory(MemoryRNN):
 
     def __init__(self, replay_dir):
@@ -96,7 +106,6 @@ class ObservationsRNNMemory(MemoryRNN):
         pi = np.pad(np.stack(samples['pi']), [(0, pad_r + pad_l), (0, 0)], 'constant', constant_values=0)
         s = np.pad(s, [(0, pad_r + pad_l), (0, 0), (0, 0), (0, 0)], 'constant', constant_values=0)
         t = np.pad(samples['t'], [(0, pad_r + pad_l)], 'constant', constant_values=1)
-
 
         return {'s': s[self.burn_in:], 'r': r[-self.seq_length:-self.n_steps], 'rho_q': rho_q[-self.seq_length:-self.n_steps],
                 'rho_v': rho_v[self.burn_in:], 'a': a[self.burn_in:], 'pi': pi[self.burn_in:],

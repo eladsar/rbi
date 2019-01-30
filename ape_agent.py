@@ -5,7 +5,6 @@ import torch.optim.lr_scheduler
 import numpy as np
 from tqdm import tqdm
 from torch.nn import functional as F
-from comet_ml import Experiment as comet
 import psutil
 
 from config import consts, args

@@ -232,6 +232,8 @@ class R2D2Agent(Agent):
                     if (n + self.n_offset) >= n_tot:
                         break
 
+            del loss_value
+
     def clean(self):
 
         while True:

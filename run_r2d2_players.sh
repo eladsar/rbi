@@ -5,7 +5,7 @@ game=$2
 resume=$3
 
 args="--n-steps=5 --no-reward-shape --no-dropout --infinite-horizon --target=tde \
---batch=32 --seq-length=30 --burn-in=10 --seq-overlap=20 \
+--batch=64 --seq-length=30 --burn-in=10 --seq-overlap=20 \
 --hidden-features=512 --hidden-features-rnn=512 --clip=0 --discount=0.997 \
 --termination-reward=0 --friction-reward=0 --priority-alpha=0.9 --priority-beta=0.6 --epsilon-a=0.001 \
 --epsilon-pre=0.00164 --epsilon-post=0.00164 --cpu-workers=48 \

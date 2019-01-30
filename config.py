@@ -43,7 +43,6 @@ boolean_feature("play", False, 'Test the learned model via playing')
 boolean_feature("multiplay", False, 'Send samples to memory from multiple parallel players')
 boolean_feature("choose", False, 'Choose best player')
 boolean_feature("clean", False, 'Clean old trajectories')
-boolean_feature("comet", False, "Log results to comet")
 boolean_feature("tensorboard", True, "Log results to tensorboard")
 boolean_feature("log-scores", True, "Log score results to NPY objects")
 parser.add_argument('--n-steps', type=int, default=6, metavar='STEPS', help='Number of steps for multi-step learning')
@@ -224,6 +223,14 @@ class Consts(object):
                              ('ep', np.int), ('t', np.float32), ('fr_s', np.int), ('fr_e', np.int),
                              ('r', np.float32), ('rho_v', np.float32), ('rho_q', np.float32), ('traj', np.int),
                              ('tde', np.float32), ('aux', np.float32)])
+
+    # observe_type = np.dtype([('s', np.float32, (args.history_length, args.height, args.width)),
+    #                          ('s_tag', np.float32, (args.history_length, args.height, args.width)),
+    #                          ('a', np.int), ('pi', np.float32, len(np.nonzero(actions[args.game])[0])),
+    #                          ('pi_tag', np.float32, len(np.nonzero(actions[args.game])[0])),
+    #                          ('h_beta', np.float32, args.hidden_features_rnn),
+    #                          ('h_q', np.float32, args.hidden_features_rnn),
+    #                          ('t', np.float32), ('r', np.float32)])
 
     outdir = os.path.join(base_dir, 'results')
     logdir = os.path.join(base_dir, 'logs')
