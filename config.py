@@ -220,6 +220,11 @@ class Consts(object):
                              ('r', np.float32), ('rho_v', np.float32), ('rho_q', np.float32), ('traj', np.int),
                              ('tde', np.float32), ('aux', np.float32)])
 
+    obs_type = np.dtype([('s', np.float32, (4, 84, 84)), ('s_tag', np.float32, (4, 84, 84)), ('a', np.int),
+                         ('r', np.float32), ('t', np.float32),
+                         ('pi', np.float32, len(np.nonzero(actions[args.game])[0])),
+                         ('pi_tag', np.float32, len(np.nonzero(actions[args.game])[0])),])
+
     outdir = os.path.join(base_dir, 'results')
     logdir = os.path.join(base_dir, 'logs')
     indir = os.path.join('/dev/shm/', username, 'rbi')

@@ -45,9 +45,7 @@ class ObservationsMemory(Memory):
         episode_dir = os.path.join(self.screen_dir, str(sample['ep']))
         s = self.preprocess_history(episode_dir, sample['fr'])
 
-        return {'s': s, 'r': sample['r'], 'rho_v': sample['rho_v'],
-                'rho_q': sample['rho_q'], 'a': sample['a'], 'pi': sample['pi'],
-                'aux': sample['aux']}
+        return {'s': s, 'r': sample['r'], 'a': sample['a'], 'pi': sample['pi']}
 
 
 class ObservationsBatchSampler(object):
@@ -98,13 +96,20 @@ class ObservationsBatchSampler(object):
             len_replay_buffer = len(replay_buffer)
 
             minibatches = min(self.replay_updates_interval, int(len_replay_buffer / self.batch) - self.n_steps)
-            shuffle_indexes = np.random.choice(len_replay_buffer - self.n_steps, (minibatches, self.batch), replace=False)
+
+            tde = replay_buffer['tde'] / np.sum(replay_buffer['tde'])
+            tde = tde[:-self.n_steps]
+
+            # shuffle_indexes = np.random.choice(len_replay_buffer - self.n_steps, (minibatches, self.batch), replace=False)
+            shuffle_indexes = np.random.choice(len_replay_buffer - self.n_steps, (minibatches, self.batch),
+                                               replace=True, p=tde)
 
             print("Explorer:Replay Buffer size is: %d" % len_replay_buffer)
 
             for i in range(minibatches):
                 samples = shuffle_indexes[i]
                 yield zip(replay_buffer[samples], replay_buffer[samples + self.n_steps])
+                # yield replay_buffer[samples]
 
     def __len__(self):
         return np.inf
@@ -116,6 +121,7 @@ class DQNMemory(Memory):
 
         super(DQNMemory, self).__init__()
         self.screen_dir = os.path.join(replay_dir, "explore", "screen")
+        self.obs_type = consts.obs_type
 
     def __getitem__(self, sample):
 
@@ -129,7 +135,15 @@ class DQNMemory(Memory):
         else:
             s_tag = np.zeros((4, 84, 84), dtype=np.float32)
 
-        return s, s_tag, sample['a'], sample['r'], sample['t'], sample['pi'], next_sample['pi']
+        # return np.array((s, s_tag, sample['a'],
+        #                  sample['r'], sample['t'], sample['pi'], next_sample['pi']), dtype=self.obs_type)
+
+        return {'s': torch.from_numpy(s), 'r': torch.from_numpy(np.array(sample['r'])),
+                'a': torch.from_numpy(np.array(sample['a'])), 't': torch.from_numpy(np.array(sample['t'])),
+                'pi': torch.from_numpy(sample['pi']),
+                's_tag': torch.from_numpy(s_tag), 'pi_tag': torch.from_numpy(next_sample['pi'])}
+
+        # return s, s_tag,
 
         # return {'s': s, 'r': sample['r'], 'a': sample['a'], 't': sample['t'], 'pi': sample['pi'],
         #         's_tag': s_tag, 'pi_tag': next_sample['pi']}
@@ -137,3 +151,24 @@ class DQNMemory(Memory):
 
 DQNBatchSampler = ObservationsBatchSampler
 
+
+def observation_collate(batch):
+
+    numel = sum([x['s'].numel() for x in batch])
+    storage = batch[0]['s'].storage()._new_shared(numel)
+    out_s = batch[0]['s'].new(storage)
+
+    numel = sum([x['s_tag'].numel() for x in batch])
+    storage = batch[0]['s_tag'].storage()._new_shared(numel)
+    out_s_tag = batch[0]['s_tag'].new(storage)
+
+    return torch.stack([sample['s'] for sample in batch], out=out_s), torch.stack([sample['s_tag'] for sample in batch], out=out_s_tag),\
+           torch.stack([sample['a'] for sample in batch]), \
+           torch.stack([sample['r'] for sample in batch]), torch.stack([sample['t'] for sample in batch]),\
+           torch.stack([sample['pi'] for sample in batch]), torch.stack([sample['pi_tag'] for sample in batch])
+
+    # return {'s': torch.from_numpy(batch['s']),
+    #         's_tag': torch.from_numpy(batch['s_tag']),
+    #         'a': torch.from_numpy(batch['a']),
+    #         'r': torch.from_numpy(batch['r']),
+    #         't': torch.from_numpy(batch['t']),}
