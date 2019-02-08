@@ -75,15 +75,11 @@ class RBIAgent(Agent):
 
         else:
 
-            # self.target_net = DuelNet().to(self.device)
-            # datasets
-            # self.train_dataset = DQNMemory(root_dir)
             self.train_dataset = DQNMemory(root_dir)
             self.train_sampler = ObservationsBatchSampler(root_dir)
             self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_sampler=self.train_sampler,
                                                             collate_fn=observation_collate, num_workers=args.cpu_workers,
                                                             pin_memory=True, drop_last=False)
-
             try:
                 os.mkdir(self.best_player_dir)
                 os.mkdir(self.exploit_dir)
@@ -105,9 +101,6 @@ class RBIAgent(Agent):
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
         self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
         self.optimizer_beta = torch.optim.Adam(self.beta_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
-        # self.optimizer_value = torch.optim.RMSprop(self.value_net.parameters(), lr=0.00025/4, alpha=0.95, eps=1.5e-7, centered=True)
-        # self.optimizer_beta = torch.optim.RMSprop(self.beta_net.parameters(), lr=0.00025/4, alpha=0.95, eps=1.5e-7, centered=True)
-
         self.n_offset = 0
 
     def save_checkpoint(self, path, aux=None):
@@ -163,8 +156,6 @@ class RBIAgent(Agent):
                    'a_player': [], 'loss_std': [],
                    'mc_val': [], "Hbeta": [], "Hpi": [], "adv_a": [], "q_a": [], 'image': []}
 
-        # tic = time.time()
-
         for n, sample in tqdm(enumerate(self.train_loader)):
 
             s = sample['s'].to(self.device)
@@ -181,14 +172,6 @@ class RBIAgent(Agent):
             beta_log = F.log_softmax(beta, dim=1)
             beta = F.softmax(beta.detach(), dim=1)
 
-            # v_eval, adv_eval, _, _, q_a = self.value_net(s, a, pi)
-            # v_target, _, _, _, _ = target_net(s_tag, a, pi_tag)
-            #
-            # v_eval = v_eval.squeeze(1).detach()
-            # v_target = v_target.squeeze(1).detach()
-            # q_a_eval = q_a.detach()
-            # adv_eval = adv_eval.detach()
-
             _, _, _, q, q_a = self.value_net(s, a, self.pi_rand_batch)
             _, _, _, q_tag, _ = self.target_net(s_tag, a, self.pi_rand_batch)
 
@@ -196,35 +179,17 @@ class RBIAgent(Agent):
             v_eval = (q * pi).sum(dim=1).unsqueeze(1)
             adv_eval = q - v_eval
             v_eval.squeeze_(1)
-            # q_a_eval = q_a.detach()
             v_target = (q_tag * pi_tag).sum(dim=1).detach()
-
-            # v, adv_eval, adv_a, _, q_a = self.value_net(s, a, beta)
-            # beta_tag = self.beta_net(s_tag)
-            # beta_tag = F.softmax(beta_tag.detach(), dim=1)
-            # v_target, _, _, _, _ = target_net(s_tag, a, beta_tag)
-            # v = v.squeeze(1)
-            # v_target = v_target.squeeze(1).detach()
-            # v_eval = v.detach()
-            # q_a_eval = q_a.detach()
-            # adv_eval = adv_eval.detach()
 
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(v_target))
 
-            # is_value = (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
-            # is_value = 1 / ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_beta
-
             is_value = tde ** (-self.priority_beta)
             is_value = is_value / is_value.max()
-
-            # is_value = 1 / (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
-            # is_value = is_value / is_value.mean()
 
             beta_mix = (1 - self.entropy_loss) * beta + self.entropy_loss / self.action_space
             std_q = ((beta_mix * adv_eval ** 2).sum(dim=1)) ** 0.5
 
             is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** self.priority_alpha
-            # is_policy = (std_q + self.epsilon_a) ** self.priority_beta
             is_policy = is_policy / is_policy.max()
 
             loss_value = ((q_a - r) ** 2 * is_value).mean()
@@ -233,16 +198,13 @@ class RBIAgent(Agent):
 
             self.optimizer_beta.zero_grad()
             loss_beta.backward()
-            # clip_grad_norm_(self.beta_net.parameters(), 40)
             self.optimizer_beta.step()
 
             self.optimizer_value.zero_grad()
             loss_value.backward()
-            # clip_grad_norm_(self.value_net.parameters(), 40)
             self.optimizer_value.step()
 
             # collect actions statistics
-
             if not (n + 1 + self.n_offset) % 50:
 
                 a_index_np = a[:, 0].data.cpu().numpy()
@@ -512,19 +474,11 @@ class RBIAgent(Agent):
             beta = F.softmax(beta.detach(), dim=1)
             # take q as adv
             _, adv, _, q, _ = self.value_net(s, a_zeros_mp, beta)
-            # _, _, _, q, _ = self.target_net(s, a_zeros_mp, beta)
-
             beta = beta.data.cpu().numpy()
 
             q = q.data.cpu().numpy()
             adv = adv.data.cpu().numpy()
             rank = np.argsort(adv, axis=1)
-
-            # mp_trigger = np.logical_and(
-            #     np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
-            #     explore_threshold >= 0)
-            #
-            # exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
 
             if self.n_offset >= self.random_initialization:
 
@@ -588,8 +542,6 @@ class RBIAgent(Agent):
                     v_scale = np.concatenate(v_target[i])
 
                     tde = ((tde + 0.01) / (np.abs(v_scale) + 0.01)) ** self.priority_alpha
-
-                    # tde = (tde + self.epsilon_a) ** self.priority_alpha
 
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
