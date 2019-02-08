@@ -48,6 +48,8 @@ class RBIAgent(Agent):
             self.target_net = nn.DataParallel(self.target_net)
         self.value_net.to(self.device)
         self.target_net.to(self.device)
+        self.target_net.reset()
+        self.beta_net.reset()
         self.target_net.load_state_dict(self.value_net.state_dict())
 
         self.pi_rand = np.ones(self.action_space) / self.action_space
@@ -152,6 +154,11 @@ class RBIAgent(Agent):
             pass
 
         return state['aux']
+
+    def load_n(self, path):
+
+        state = torch.load(path, map_location="cuda:%d" % self.cuda_id)
+        self.n_offset = state['aux']['n']
 
     def learn(self, n_interval, n_tot):
 
@@ -283,11 +290,17 @@ class RBIAgent(Agent):
 
                 if not (n + 1 + self.n_offset) % self.update_memory_interval:
                     # save agent state
-                    self.save_checkpoint(self.snapshot_path, {'n': self.n_offset + n + 1})
+                    if (n + 1 + self.n_offset) % 100000 >= 5000:
+                        self.save_checkpoint(self.snapshot_path, {'n': self.n_offset + n + 1})
 
-                if not (n+1) % self.update_target_interval:
+                if not (n + 1 + self.n_offset) % self.update_target_interval:
                     # save agent state
                     self.target_net.load_state_dict(self.value_net.state_dict())
+
+                if not (n + 1 + self.n_offset) % 100000:
+                    # save agent state
+                    self.target_net.reset()
+                    self.beta_net.reset()
 
                 if not (n + 1 + self.n_offset) % n_interval:
                     results['act_diff'] = np.concatenate(results['act_diff'])

@@ -31,8 +31,8 @@ class DuelNet(nn.Module):
             nn.Linear(3136, args.hidden_features),
             # nn.BatchNorm1d(args.hidden_features, eps=1e-05, momentum=batch_momentum, affine=True),
             nn.ReLU(),
-            nn.utils.weight_norm(nn.Linear(args.hidden_features, action_space)),
-            # nn.Linear(args.hidden_features, action_space),
+            # nn.utils.weight_norm(nn.Linear(args.hidden_features, action_space)),
+            nn.Linear(args.hidden_features, action_space),
         )
 
         # batch normalization and dropout
@@ -57,8 +57,21 @@ class DuelNet(nn.Module):
         self.cnn[4].bias.data.zero_()
 
     def reset(self):
-        for weight in self.parameters():
-            nn.init.xavier_uniform(weight.data)
+        nn.init.xavier_uniform_(self.cnn[0].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.cnn[0].bias)
+        nn.init.xavier_uniform_(self.cnn[2].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.cnn[2].bias)
+        nn.init.xavier_uniform_(self.cnn[4].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.cnn[4].bias)
+
+        nn.init.xavier_uniform_(self.fc_adv[0].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.fc_adv[0].bias)
+        nn.init.xavier_uniform_(self.fc_adv[2].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.fc_adv[2].bias)
+        nn.init.xavier_uniform_(self.fc_v[0].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.fc_v[0].bias)
+        nn.init.xavier_uniform_(self.fc_v[2].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.fc_v[2].bias)
 
     def forward(self, s, a, beta):
 
@@ -118,8 +131,17 @@ class BehavioralNet(nn.Module):
         self.cnn[4].bias.data.zero_()
 
     def reset(self):
-        for weight in self.parameters():
-            nn.init.xavier_uniform(weight.data)
+        nn.init.xavier_uniform_(self.cnn[0].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.cnn[0].bias)
+        nn.init.xavier_uniform_(self.cnn[2].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.cnn[2].bias)
+        nn.init.xavier_uniform_(self.cnn[4].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.cnn[4].bias)
+
+        nn.init.xavier_uniform_(self.fc_beta[0].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.fc_beta[0].bias)
+        nn.init.xavier_uniform_(self.fc_beta[2].weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.fc_beta[2].bias)
 
     def forward(self, s):
 
