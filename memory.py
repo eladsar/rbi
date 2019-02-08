@@ -141,7 +141,8 @@ class DQNMemory(Memory):
         return {'s': torch.from_numpy(s), 'r': torch.from_numpy(np.array(sample['r'])),
                 'a': torch.from_numpy(np.array(sample['a'])), 't': torch.from_numpy(np.array(sample['t'])),
                 'pi': torch.from_numpy(sample['pi']),
-                's_tag': torch.from_numpy(s_tag), 'pi_tag': torch.from_numpy(next_sample['pi'])}
+                's_tag': torch.from_numpy(s_tag), 'pi_tag': torch.from_numpy(next_sample['pi']),
+                'tde': torch.from_numpy(np.array(sample['tde']))}
 
         # return s, s_tag,
 
@@ -162,10 +163,14 @@ def observation_collate(batch):
     storage = batch[0]['s_tag'].storage()._new_shared(numel)
     out_s_tag = batch[0]['s_tag'].new(storage)
 
-    return torch.stack([sample['s'] for sample in batch], out=out_s), torch.stack([sample['s_tag'] for sample in batch], out=out_s_tag),\
-           torch.stack([sample['a'] for sample in batch]), \
-           torch.stack([sample['r'] for sample in batch]), torch.stack([sample['t'] for sample in batch]),\
-           torch.stack([sample['pi'] for sample in batch]), torch.stack([sample['pi_tag'] for sample in batch])
+    return {'s': torch.stack([sample['s'] for sample in batch], out=out_s),
+            's_tag': torch.stack([sample['s_tag'] for sample in batch], out=out_s_tag),
+            'a': torch.stack([sample['a'] for sample in batch]),
+            'r': torch.stack([sample['r'] for sample in batch]),
+            't': torch.stack([sample['t'] for sample in batch]),
+            'pi': torch.stack([sample['pi'] for sample in batch]),
+            'pi_tag': torch.stack([sample['pi_tag'] for sample in batch]),
+            'tde': torch.stack([sample['tde'] for sample in batch])}
 
     # return {'s': torch.from_numpy(batch['s']),
     #         's_tag': torch.from_numpy(batch['s_tag']),

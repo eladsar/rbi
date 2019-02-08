@@ -6,6 +6,7 @@ import numpy as np
 from tqdm import tqdm
 from torch.nn import functional as F
 import torch.nn as nn
+from torch.nn.utils import clip_grad_norm_
 import itertools
 
 from config import consts, args
@@ -104,6 +105,8 @@ class RBIAgent(Agent):
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
         self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
         self.optimizer_beta = torch.optim.Adam(self.beta_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
+        # self.optimizer_value = torch.optim.RMSprop(self.value_net.parameters(), lr=0.00025/4, alpha=0.95, eps=1.5e-7, centered=True)
+        # self.optimizer_beta = torch.optim.RMSprop(self.beta_net.parameters(), lr=0.00025/4, alpha=0.95, eps=1.5e-7, centered=True)
 
         self.n_offset = 0
 
@@ -164,23 +167,14 @@ class RBIAgent(Agent):
 
         for n, sample in tqdm(enumerate(self.train_loader)):
 
-            s = sample[0].to(self.device)
-            s_tag = sample[1].to(self.device)
-            a = sample[2].to(self.device).unsqueeze_(1)
-            r = sample[3].to(self.device)
-            t = sample[4].to(self.device)
-            pi = sample[5].to(self.device)
-            pi_tag = sample[6].to(self.device)
-
-            # s = sample['s'].to(self.device)
-            # a = sample['a'].to(self.device).unsqueeze_(1)
-            # # s_tag = sample['s_tag'].to(self.device)
-            #
-            # pi = sample['pi'].to(self.device)
-            # # pi_tag = sample['pi_tag'].to(self.device)
-            #
-            # r = sample['r'].to(self.device)
-            # # t = sample['t'].to(self.device)
+            s = sample['s'].to(self.device)
+            s_tag = sample['s_tag'].to(self.device)
+            a = sample['a'].to(self.device).unsqueeze_(1)
+            r = sample['r'].to(self.device)
+            t = sample['t'].to(self.device)
+            pi = sample['pi'].to(self.device)
+            pi_tag = sample['pi_tag'].to(self.device)
+            tde = sample['tde'].to(self.device)
 
             # Behavioral nets
             beta = self.beta_net(s)
@@ -202,7 +196,7 @@ class RBIAgent(Agent):
             v_eval = (q * pi).sum(dim=1).unsqueeze(1)
             adv_eval = q - v_eval
             v_eval.squeeze_(1)
-            q_a_eval = q_a.detach()
+            # q_a_eval = q_a.detach()
             v_target = (q_tag * pi_tag).sum(dim=1).detach()
 
             # v, adv_eval, adv_a, _, q_a = self.value_net(s, a, beta)
@@ -219,15 +213,19 @@ class RBIAgent(Agent):
 
             # is_value = (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
             # is_value = 1 / ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_beta
-            is_value = 1 / (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
-            is_value = is_value / is_value.mean()
+
+            is_value = tde ** (-self.priority_beta)
+            is_value = is_value / is_value.max()
+
+            # is_value = 1 / (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
+            # is_value = is_value / is_value.mean()
 
             beta_mix = (1 - self.entropy_loss) * beta + self.entropy_loss / self.action_space
             std_q = ((beta_mix * adv_eval ** 2).sum(dim=1)) ** 0.5
 
             is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** self.priority_alpha
             # is_policy = (std_q + self.epsilon_a) ** self.priority_beta
-            is_policy = is_policy / is_policy.mean()
+            is_policy = is_policy / is_policy.max()
 
             loss_value = ((q_a - r) ** 2 * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
@@ -235,10 +233,12 @@ class RBIAgent(Agent):
 
             self.optimizer_beta.zero_grad()
             loss_beta.backward()
+            # clip_grad_norm_(self.beta_net.parameters(), 40)
             self.optimizer_beta.step()
 
             self.optimizer_value.zero_grad()
             loss_value.backward()
+            # clip_grad_norm_(self.value_net.parameters(), 40)
             self.optimizer_value.step()
 
             # collect actions statistics
@@ -511,8 +511,8 @@ class RBIAgent(Agent):
             beta = self.beta_net(s)
             beta = F.softmax(beta.detach(), dim=1)
             # take q as adv
-            _, adv, _, _, _ = self.value_net(s, a_zeros_mp, beta)
-            _, _, _, q, _ = self.target_net(s, a_zeros_mp, beta)
+            _, adv, _, q, _ = self.value_net(s, a_zeros_mp, beta)
+            # _, _, _, q, _ = self.target_net(s, a_zeros_mp, beta)
 
             beta = beta.data.cpu().numpy()
 

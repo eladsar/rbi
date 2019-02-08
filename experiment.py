@@ -1,4 +1,3 @@
-import csv
 import time
 import os
 import sys
@@ -82,14 +81,10 @@ class Experiment(object):
             # copy code to dir
             copy_tree(os.path.abspath("."), self.code_dir)
 
-            # write csv file of hyper-parameters
-            filename = os.path.join(self.root, "hyperparameters.csv")
-            with open(filename, 'w', newline='') as csvfile:
-                spamwriter = csv.writer(csvfile, delimiter=',',
-                                        quotechar='|', quoting=csv.QUOTE_MINIMAL)
-                spamwriter.writerow(self.exp_name)
-                for k, v in vars(args).items():
-                    spamwriter.writerow([k, str(v)])
+            # write args to file
+            filename = os.path.join(self.root, "args.txt")
+            with open(filename, 'w') as fp:
+                fp.write('\n'.join(sys.argv[1:]))
 
             with open(os.path.join(self.root, "logger"), "a") as fo:
                 fo.write("%s\n" % logger_file)

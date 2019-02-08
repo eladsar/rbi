@@ -6,6 +6,7 @@ import numpy as np
 
 
 action_space = len(np.nonzero(consts.actions[args.game])[0])
+batch_momentum = 0.001
 
 
 class DuelNet(nn.Module):
@@ -16,25 +17,37 @@ class DuelNet(nn.Module):
 
         # value net
         self.fc_v = nn.Sequential(
+            # nn.utils.weight_norm(nn.Linear(3136, args.hidden_features)),
             nn.Linear(3136, args.hidden_features),
+            # nn.BatchNorm1d(args.hidden_features, eps=1e-05, momentum=batch_momentum, affine=True),
             nn.ReLU(),
+            # nn.utils.weight_norm(nn.Linear(args.hidden_features, 1)),
             nn.Linear(args.hidden_features, 1),
         )
 
         # advantage net
         self.fc_adv = nn.Sequential(
+            # nn.utils.weight_norm(nn.Linear(3136, args.hidden_features)),
             nn.Linear(3136, args.hidden_features),
+            # nn.BatchNorm1d(args.hidden_features, eps=1e-05, momentum=batch_momentum, affine=True),
             nn.ReLU(),
-            nn.Linear(args.hidden_features, action_space),
+            nn.utils.weight_norm(nn.Linear(args.hidden_features, action_space)),
+            # nn.Linear(args.hidden_features, action_space),
         )
 
         # batch normalization and dropout
         self.cnn = nn.Sequential(
+            # nn.utils.weight_norm(nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4)),
             nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
+            # nn.BatchNorm2d(32, eps=1e-05, momentum=batch_momentum, affine=False),
             nn.ReLU(),
+            # nn.utils.weight_norm(nn.Conv2d(32, 64, kernel_size=4, stride=2)),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            # nn.BatchNorm2d(64, eps=1e-05, momentum=batch_momentum, affine=False),
             nn.ReLU(),
+            # nn.utils.weight_norm(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            # nn.BatchNorm2d(64, eps=1e-05, momentum=batch_momentum, affine=False),
             nn.ReLU(),
         )
 
@@ -42,6 +55,10 @@ class DuelNet(nn.Module):
         self.cnn[0].bias.data.zero_()
         self.cnn[2].bias.data.zero_()
         self.cnn[4].bias.data.zero_()
+
+    def reset(self):
+        for weight in self.parameters():
+            nn.init.xavier_uniform(weight.data)
 
     def forward(self, s, a, beta):
 
@@ -71,18 +88,27 @@ class BehavioralNet(nn.Module):
 
         # batch normalization and dropout
         self.cnn = nn.Sequential(
+            # nn.utils.weight_norm(nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4)),
             nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
+            # nn.BatchNorm2d(32, eps=1e-05, momentum=batch_momentum, affine=False),
             nn.ReLU(),
+            # nn.utils.weight_norm(nn.Conv2d(32, 64, kernel_size=4, stride=2)),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            # nn.BatchNorm2d(64, eps=1e-05, momentum=batch_momentum, affine=False),
             nn.ReLU(),
+            # nn.utils.weight_norm(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            # nn.BatchNorm2d(64, eps=1e-05, momentum=batch_momentum, affine=False),
             nn.ReLU(),
         )
 
         # advantage net
         self.fc_beta = nn.Sequential(
+            # nn.utils.weight_norm(nn.Linear(3136, args.hidden_features)),
             nn.Linear(3136, args.hidden_features),
+            # nn.BatchNorm1d(args.hidden_features, eps=1e-05, momentum=batch_momentum, affine=True),
             nn.ReLU(),
+            # nn.utils.weight_norm(nn.Linear(args.hidden_features, action_space)),
             nn.Linear(args.hidden_features, action_space),
         )
 
@@ -90,6 +116,10 @@ class BehavioralNet(nn.Module):
         self.cnn[0].bias.data.zero_()
         self.cnn[2].bias.data.zero_()
         self.cnn[4].bias.data.zero_()
+
+    def reset(self):
+        for weight in self.parameters():
+            nn.init.xavier_uniform(weight.data)
 
     def forward(self, s):
 
