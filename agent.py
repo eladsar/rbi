@@ -2,10 +2,12 @@ import numpy as np
 import os
 from config import consts, args
 import torch
+import time
+import shutil
 
 class Agent(object):
 
-    def __init__(self, root_dir, checkpoint=None):
+    def __init__(self, root_dir, checkpoint=None, player=False):
         # parameters
         self.discount = args.discount
         self.update_target_interval = args.update_target_interval
@@ -59,12 +61,30 @@ class Agent(object):
         self.root_dir = root_dir
         self.best_player_dir = os.path.join(root_dir, "best")
         self.snapshot_path = os.path.join(root_dir, "snapshot")
-        self.exploit_dir = os.path.join(root_dir, "exploit")
         self.explore_dir = os.path.join(root_dir, "explore")
         self.list_dir = os.path.join(root_dir, "list")
         self.writelock = os.path.join(self.list_dir, "writelock.npy")
         self.episodelock = os.path.join(self.list_dir, "episodelock.npy")
         self.device = torch.device("cuda:%d" % self.cuda_id)
+
+        if player:
+
+            print("Explorer player")
+            self.trajectory_dir = os.path.join(self.explore_dir, "trajectory")
+            self.screen_dir = os.path.join(self.explore_dir, "screen")
+            self.readlock = os.path.join(self.list_dir, "readlock_explore.npy")
+        else:
+            try:
+                os.mkdir(self.best_player_dir)
+                os.mkdir(self.explore_dir)
+                os.mkdir(os.path.join(self.explore_dir, "trajectory"))
+                os.mkdir(os.path.join(self.explore_dir, "screen"))
+                os.mkdir(self.list_dir)
+                np.save(self.writelock, 0)
+                np.save(self.episodelock, 0)
+                np.save(os.path.join(self.list_dir, "readlock_explore.npy"), [])
+            except FileExistsError:
+                pass
 
     def save_checkpoint(self, path, aux=None):
         raise NotImplementedError
@@ -109,3 +129,30 @@ class Agent(object):
     def resume(self, model_path):
         aux = self.load_checkpoint(model_path)
         return aux
+
+    def clean(self):
+
+        while True:
+
+            time.sleep(2)
+
+            screen_dir = os.path.join(self.explore_dir, "screen")
+            trajectory_dir = os.path.join(self.explore_dir, "trajectory")
+
+            try:
+                del_inf = np.load(os.path.join(self.list_dir, "old_explore.npy"))
+            except (IOError, ValueError):
+                continue
+            traj_min = del_inf[0] - 32
+            episode_list = set()
+
+            for traj in os.listdir(trajectory_dir):
+                traj_num = int(traj.split(".")[0])
+                if traj_num < traj_min:
+                    traj_data = np.load(os.path.join(trajectory_dir, traj))
+                    for d in traj_data['ep']:
+                        episode_list.add(d)
+                    os.remove(os.path.join(trajectory_dir, traj))
+
+            for ep in episode_list:
+                shutil.rmtree(os.path.join(screen_dir, str(ep)))

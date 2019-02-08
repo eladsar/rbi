@@ -30,7 +30,7 @@ class ApeAgent(Agent):
     def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
 
         print("Learning with Ape Agent")
-        super(ApeAgent, self).__init__(root_dir, checkpoint)
+        super(ApeAgent, self).__init__(root_dir, checkpoint, player)
 
         self.value_net = DuelNet()
         self.target_net = DuelNet()
@@ -59,11 +59,6 @@ class ApeAgent(Agent):
             self.frame = 0
             self.states = 0
 
-            print("Explorer player")
-            self.trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-            self.screen_dir = os.path.join(self.explore_dir, "screen")
-            self.readlock = os.path.join(self.list_dir, "readlock_explore.npy")
-
         else:
 
             # datasets
@@ -72,21 +67,6 @@ class ApeAgent(Agent):
             self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_sampler=self.train_sampler,
                                                             collate_fn=collate, num_workers=args.cpu_workers,
                                                             pin_memory=True, drop_last=False)
-            try:
-                os.mkdir(self.best_player_dir)
-                os.mkdir(self.exploit_dir)
-                os.mkdir(self.explore_dir)
-                os.mkdir(os.path.join(self.exploit_dir, "trajectory"))
-                os.mkdir(os.path.join(self.exploit_dir, "screen"))
-                os.mkdir(os.path.join(self.explore_dir, "trajectory"))
-                os.mkdir(os.path.join(self.explore_dir, "screen"))
-                os.mkdir(self.list_dir)
-                np.save(self.writelock, 0)
-                np.save(self.episodelock, 0)
-                np.save(os.path.join(self.list_dir, "readlock_explore.npy"), [])
-                np.save(os.path.join(self.list_dir, "readlock_exploit.npy"), [])
-            except FileExistsError:
-                pass
 
         # configure learning
 
@@ -217,33 +197,6 @@ class ApeAgent(Agent):
 
                     if (n + self.n_offset) >= n_tot:
                         break
-
-    def clean(self):
-
-        while True:
-
-            time.sleep(2)
-
-            screen_dir = os.path.join(self.explore_dir, "screen")
-            trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-
-            try:
-                del_inf = np.load(os.path.join(self.list_dir, "old_explore.npy"))
-            except (IOError, ValueError):
-                continue
-            traj_min = del_inf[0] - 32
-            episode_list = set()
-
-            for traj in os.listdir(trajectory_dir):
-                traj_num = int(traj.split(".")[0])
-                if traj_num < traj_min:
-                    traj_data = np.load(os.path.join(trajectory_dir, traj))
-                    for d in traj_data['ep']:
-                        episode_list.add(d)
-                    os.remove(os.path.join(trajectory_dir, traj))
-
-            for ep in episode_list:
-                shutil.rmtree(os.path.join(screen_dir, str(ep)))
 
     def play(self, n_tot, save=True, load=True, fix=False):
 
