@@ -55,7 +55,6 @@ class ApeAgent(Agent):
             self.trajectory = []
             self.images = []
             self.choices = np.arange(self.action_space, dtype=np.int)
-            self.pi_rand = np.ones(self.action_space) / self.action_space
             self.n_replay_saved = 1
             self.frame = 0
             self.states = 0
@@ -150,7 +149,7 @@ class ApeAgent(Agent):
             _, _, _, q_tag_target, _ = self.target_net(s_tag, a, self.pi_rand_batch)
             q_tag_target = q_tag_target.detach()
 
-            _, _, _, _, q_a = self.value_net(s, a, self.pi_rand_batch)
+            _, _, _, q, q_a = self.value_net(s, a, self.pi_rand_batch)
 
             a_tag = torch.argmax(q_tag_eval, dim=1).unsqueeze(1)
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(q_tag_target.gather(1, a_tag).squeeze(1)))
@@ -248,6 +247,9 @@ class ApeAgent(Agent):
 
     def play(self, n_tot, save=True, load=True, fix=False):
 
+        pi_rand = np.ones(self.action_space) / self.action_space
+        pi_rand = torch.FloatTensor(pi_rand).unsqueeze(0).to(self.device)
+
         for i in range(n_tot):
 
             self.env.reset()
@@ -277,7 +279,7 @@ class ApeAgent(Agent):
 
                 s = self.env.s.to(self.device)
                 # get aux data
-                _, _, _, q, _ = self.value_net(s, self.a_zeros)
+                _, _, _, q, _ = self.value_net(s, self.a_zeros, pi_rand)
 
                 q = q.squeeze(0).data.cpu().numpy()
 
