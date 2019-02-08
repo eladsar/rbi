@@ -6,8 +6,6 @@ import numpy as np
 from tqdm import tqdm
 from torch.nn import functional as F
 import torch.nn as nn
-from torch.nn.utils import clip_grad_norm_
-import itertools
 
 from config import consts, args
 import psutil
@@ -15,7 +13,7 @@ import socket
 
 from model import BehavioralNet, DuelNet
 
-from memory import ObservationsMemory, ObservationsBatchSampler, DQNMemory, observation_collate
+from memory import ReplayBatchSampler, Memory, collate
 from agent import Agent
 from environment import Env
 from preprocess import get_tde_value, _get_mc_value, h_torch, hinv_torch, release_file, lock_file, _get_td_value
@@ -37,15 +35,15 @@ class RBIAgent(Agent):
         super(RBIAgent, self).__init__(root_dir, checkpoint)
 
         self.beta_net = BehavioralNet()
+        self.value_net = DuelNet()
+        self.target_net = DuelNet()
+
         if torch.cuda.device_count() > 1:
             self.beta_net = nn.DataParallel(self.beta_net)
-        self.beta_net.to(self.device)
-
-        self.value_net = DuelNet().to(self.device)
-        self.target_net = DuelNet()
-        if torch.cuda.device_count() > 1:
             self.value_net = nn.DataParallel(self.value_net)
             self.target_net = nn.DataParallel(self.target_net)
+
+        self.beta_net.to(self.device)
         self.value_net.to(self.device)
         self.target_net.to(self.device)
         self.target_net.load_state_dict(self.value_net.state_dict())
@@ -75,10 +73,10 @@ class RBIAgent(Agent):
 
         else:
 
-            self.train_dataset = DQNMemory(root_dir)
-            self.train_sampler = ObservationsBatchSampler(root_dir)
+            self.train_dataset = Memory(root_dir)
+            self.train_sampler = ReplayBatchSampler(root_dir)
             self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_sampler=self.train_sampler,
-                                                            collate_fn=observation_collate, num_workers=args.cpu_workers,
+                                                            collate_fn=collate, num_workers=args.cpu_workers,
                                                             pin_memory=True, drop_last=False)
             try:
                 os.mkdir(self.best_player_dir)

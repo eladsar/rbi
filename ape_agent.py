@@ -2,19 +2,19 @@ import torch
 import torch.utils.data
 import torch.utils.data.sampler
 import torch.optim.lr_scheduler
+import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
-from torch.nn import functional as F
 import psutil
 
 from config import consts, args
 
 from model import DuelNet
 
-from memory import DQNMemory, DQNBatchSampler
+from memory import ReplayBatchSampler, Memory, collate
 from agent import Agent
 from environment import Env
-from preprocess import get_tde_value, lock_file, release_file, h_torch, hinv_torch, _get_mc_value
+from preprocess import get_tde_value, lock_file, release_file, h_torch, hinv_torch, _get_mc_value, _get_td_value
 import cv2
 import os
 import time
@@ -32,7 +32,16 @@ class ApeAgent(Agent):
         print("Learning with Ape Agent")
         super(ApeAgent, self).__init__(root_dir, checkpoint)
 
-        self.dqn_net = DuelNet().to(self.device)
+        self.value_net = DuelNet()
+        self.target_net = DuelNet()
+
+        if torch.cuda.device_count() > 1:
+            self.value_net = nn.DataParallel(self.value_net)
+            self.target_net = nn.DataParallel(self.target_net)
+
+        self.value_net.to(self.device)
+        self.target_net.to(self.device)
+        self.target_net.load_state_dict(self.value_net.state_dict())
 
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
 
@@ -59,10 +68,11 @@ class ApeAgent(Agent):
         else:
 
             # datasets
-            self.train_dataset = DQNMemory(root_dir)
-            self.train_sampler = DQNBatchSampler(root_dir)
+            self.train_dataset = Memory(root_dir)
+            self.train_sampler = ReplayBatchSampler(root_dir)
             self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_sampler=self.train_sampler,
-                                                            num_workers=args.cpu_workers, pin_memory=True, drop_last=False)
+                                                            collate_fn=collate, num_workers=args.cpu_workers,
+                                                            pin_memory=True, drop_last=False)
             try:
                 os.mkdir(self.best_player_dir)
                 os.mkdir(self.exploit_dir)
@@ -82,33 +92,44 @@ class ApeAgent(Agent):
         # configure learning
 
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
-        self.optimizer = torch.optim.Adam(self.dqn_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
+        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
         self.n_offset = 0
 
     def save_checkpoint(self, path, aux=None):
 
-        state = {'dqn_net': self.dqn_net.state_dict(),
-                 'optimizer': self.optimizer.state_dict(),
-                 'aux': aux}
+        if torch.cuda.device_count() > 1:
+            state = {'value_net': self.value_net.module.state_dict(),
+                     'target_net': self.target_net.module.state_dict(),
+                     'optimizer_value': self.optimizer_value.state_dict(),
+                     'aux': aux}
+        else:
+            state = {'value_net': self.value_net.state_dict(),
+                     'target_net': self.target_net.state_dict(),
+                     'optimizer_value': self.optimizer_value.state_dict(),
+                     'aux': aux}
 
         torch.save(state, path)
 
     def load_checkpoint(self, path):
 
         state = torch.load(path, map_location="cuda:%d" % self.cuda_id)
-        self.dqn_net.load_state_dict(state['dqn_net'])
-        self.optimizer.load_state_dict(state['optimizer'])
+
+        if torch.cuda.device_count() > 1:
+            self.value_net.module.load_state_dict(state['value_net'])
+            self.target_net.module.load_state_dict(state['target_net'])
+        else:
+            self.value_net.load_state_dict(state['value_net'])
+            self.target_net.load_state_dict(state['target_net'])
+
+        self.optimizer_value.load_state_dict(state['optimizer_value'])
         self.n_offset = state['aux']['n']
 
         return state['aux']
 
     def learn(self, n_interval, n_tot):
 
-        self.dqn_net.train()
-
-        target_net = DuelNet().to(self.device)
-        target_net.load_state_dict(self.dqn_net.state_dict())
-        target_net.eval()
+        self.value_net.train()
+        self.target_net.eval()
 
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
                    'a_player': [], 'loss_std': [], 'mc_val': [], "Hbeta": [], "Hpi": [],
@@ -119,31 +140,30 @@ class ApeAgent(Agent):
             s = sample['s'].to(self.device)
             a = sample['a'].to(self.device).unsqueeze_(1)
             r = sample['r'].to(self.device)
-
             t = sample['t'].to(self.device)
             s_tag = sample['s_tag'].to(self.device)
+            tde = sample['tde'].to(self.device)
 
-            _, _, _, q_tag_eval, _ = self.dqn_net(s_tag, a, self.pi_rand_batch)
+            _, _, _, q_tag_eval, _ = self.value_net(s_tag, a, self.pi_rand_batch)
             q_tag_eval = q_tag_eval.detach()
 
-            _, _, _, q_tag_target, _ = target_net(s_tag, a, self.pi_rand_batch)
+            _, _, _, q_tag_target, _ = self.target_net(s_tag, a, self.pi_rand_batch)
             q_tag_target = q_tag_target.detach()
 
-            _, _, _, _, q_a = self.dqn_net(s, a, self.pi_rand_batch)
-            q_a_eval = q_a.detach()
+            _, _, _, _, q_a = self.value_net(s, a, self.pi_rand_batch)
 
             a_tag = torch.argmax(q_tag_eval, dim=1).unsqueeze(1)
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(q_tag_target.gather(1, a_tag).squeeze(1)))
 
-            is_value = ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_beta
-            is_value = is_value / is_value.mean()
+            is_value = tde ** (-self.priority_beta)
+            is_value = is_value / is_value.max()
             loss_value = ((q_a - r) ** 2 * is_value).mean()
 
             # Learning part
 
-            self.optimizer.zero_grad()
+            self.optimizer_value.zero_grad()
             loss_value.backward()
-            self.optimizer.step()
+            self.optimizer_value.step()
 
             # collect actions statistics
 
@@ -181,7 +201,7 @@ class ApeAgent(Agent):
 
                 if not (n+1) % self.update_target_interval:
                     # save agent state
-                    target_net.load_state_dict(self.dqn_net.state_dict())
+                    self.target_net.load_state_dict(self.value_net.state_dict())
 
                 if not (n+1) % n_interval:
                     results['act_diff'] = np.concatenate(results['act_diff'])
@@ -193,7 +213,7 @@ class ApeAgent(Agent):
                     results['image'] = s[0, :-1, :, :].data.cpu()
 
                     yield results
-                    self.dqn_net.train()
+                    self.value_net.train()
                     results = {key: [] for key in results}
 
                     if (n + self.n_offset) >= n_tot:
@@ -235,7 +255,6 @@ class ApeAgent(Agent):
             rewards = [[]]
             q_val = []
             lives = self.env.lives
-            trigger = False
 
             while not fix:
                 try:
@@ -244,7 +263,7 @@ class ApeAgent(Agent):
                 except:
                     time.sleep(0.5)
 
-            self.dqn_net.eval()
+            self.value_net.eval()
 
             while not self.env.t:
 
@@ -254,11 +273,11 @@ class ApeAgent(Agent):
                     except:
                         pass
 
-                    self.dqn_net.eval()
+                    self.value_net.eval()
 
                 s = self.env.s.to(self.device)
                 # get aux data
-                _, _, _, q, _ = self.dqn_net(s, self.a_zeros)
+                _, _, _, q, _ = self.value_net(s, self.a_zeros)
 
                 q = q.squeeze(0).data.cpu().numpy()
 
@@ -315,7 +334,9 @@ class ApeAgent(Agent):
         mp_pi_rand = np.repeat(np.expand_dims(self.pi_rand, axis=0), n_players, axis=0)
         range_players = np.arange(n_players)
         rewards = [[[]] for _ in range(n_players)]
+        v_target = [[[]] for _ in range(n_players)]
         episode = [[] for _ in range(n_players)]
+        q_a = [[] for _ in range(n_players)]
         image_dir = ['' for _ in range(n_players)]
         trajectory = [[] for _ in range(n_players)]
 
@@ -350,13 +371,13 @@ class ApeAgent(Agent):
                 except:
                     pass
 
-                self.dqn_net.eval()
+                self.value_net.eval()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
             aux = torch.cat([env.aux for env in mp_env]).to(self.device)
             aux_np = aux.cpu().numpy().astype(np.float32)
 
-            _, _, _, q, _ = self.dqn_net(s, a_zeros_mp, pi_rand_batch)
+            _, _, _, q, _ = self.value_net(s, a_zeros_mp, pi_rand_batch)
 
             q = q.data.cpu().numpy()
 
@@ -371,6 +392,8 @@ class ApeAgent(Agent):
             pi_mix = pi * (1 - exploration) + exploration * mp_pi_rand
             pi_mix = pi_mix.clip(0, 1)
             pi_mix = pi_mix / np.repeat(np.expand_dims(pi_mix.sum(axis=1), axis=1), self.action_space, axis=1)
+
+            v_expected = (q * pi).sum(axis=1)
 
             for i in range(n_players):
 
@@ -388,17 +411,25 @@ class ApeAgent(Agent):
 
                 if lives[i] > env.lives:
                     rewards[i].append([])
+                    v_target[i].append([])
                 lives[i] = env.lives
 
                 rewards[i][-1].append(env.r)
+                v_target[i][-1].append(v_expected[i])
+                q_a[i].append(q[i][a])
 
                 if env.t:
 
                     td_val, t_val = get_tde_value(rewards[i], self.discount, self.n_steps)
+                    tde = np.abs(np.array(q_a[i]) - _get_td_value(rewards[i], v_target[i], self.discount, self.n_steps))
+                    v_scale = np.concatenate(v_target[i])
+
+                    tde = ((tde + 0.01) / (np.abs(v_scale) + 0.01)) ** self.priority_alpha
 
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
                     episode_df['t'] = t_val[self.history_length - 1:self.max_length]
+                    episode_df['tde'] = tde[self.history_length - 1:self.max_length]
 
                     trajectory[i].append(episode_df)
 
@@ -408,7 +439,9 @@ class ApeAgent(Agent):
 
                     env.reset()
                     episode[i] = []
+                    q_a[i] = []
                     rewards[i] = [[]]
+                    v_target[i] = [[]]
                     lives[i] = env.lives
 
                     # get new episode number
@@ -460,7 +493,7 @@ class ApeAgent(Agent):
 
     def demonstrate(self, n_tot):
 
-        self.dqn_net.eval()
+        self.value_net.eval()
 
         for i in range(n_tot):
 
@@ -475,7 +508,7 @@ class ApeAgent(Agent):
                 s = self.env.s.to(self.device)
                 aux = self.env.aux.to(self.device)
 
-                v, adv, _, q, _ = self.dqn_net(s, self.a_zeros)
+                v, adv, _, q, _ = self.value_net(s, self.a_zeros)
                 v = v.squeeze(0)
                 adv = adv.squeeze(0)
                 q = q.squeeze(0).data.cpu().numpy()

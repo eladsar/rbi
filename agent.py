@@ -6,8 +6,6 @@ import torch
 class Agent(object):
 
     def __init__(self, root_dir, checkpoint=None):
-        self.model = None
-        self.optimizer = None
         # parameters
         self.discount = args.discount
         self.update_target_interval = args.update_target_interval
