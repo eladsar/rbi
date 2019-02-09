@@ -95,7 +95,8 @@ else:
     hinv_np_tag = _idle
     hinv_torch_tag = _idle
 
-def _get_truncated_value(rewards, v_target, discount, n_steps):
+
+def get_truncated_value(rewards, v_target, discount, n_steps):
 
     if infinite_horizon:
         rewards = [list(itertools.chain(*rewards))]
@@ -120,7 +121,8 @@ def _get_truncated_value(rewards, v_target, discount, n_steps):
 
     return np.concatenate(values).astype(np.float32)
 
-def _get_mc_value(rewards, v_target, discount, n_steps):
+
+def get_mc_value(rewards, v_target, discount, n_steps):
 
     if infinite_horizon:
         rewards = [list(itertools.chain(*rewards))]
@@ -148,7 +150,7 @@ def _get_mc_value(rewards, v_target, discount, n_steps):
     return np.concatenate(values).astype(np.float32)
 
 
-def _get_td_value(rewards, v_target, discount, n_steps):
+def get_td_value(rewards, v_target, discount, n_steps):
 
     if infinite_horizon:
         rewards = [list(itertools.chain(*rewards))]
@@ -183,16 +185,6 @@ def _get_td_value(rewards, v_target, discount, n_steps):
         values.append(val)
 
     return np.concatenate(values).astype(np.float32)
-
-# get_expected_value = _get_truncated_value
-if args.target == 'td':
-    get_expected_value = _get_td_value
-elif args.target == 'mc':
-    get_expected_value = _get_mc_value
-elif args.target == 'tde':
-    get_expected_value = _get_truncated_value
-else:
-    raise NotImplementedError
 
 def get_gae_est(rewards, v_target, discount):
 
@@ -293,7 +285,7 @@ def get_tde_value(rewards, discount, n_steps):
 def get_tde(rewards, v_target, discount, n_steps, q_expected):
 
     # tde calculations
-    td_target = _get_td_value(rewards, v_target, discount, n_steps)
+    td_target = get_td_value(rewards, v_target, discount, n_steps)
     tde = (np.abs(np.array(q_expected) - td_target) + 0.1) / (np.abs(td_target) + 0.1)
 
     n = seq_length - n_steps
@@ -345,6 +337,15 @@ def get_gtd_value(rewards, v_target, discount, mu, sigma):
         values.append(val)
 
     return np.concatenate(values).astype(np.float32)
+
+
+def state_to_img(s):
+
+    img = s.squeeze(0).data[:3].cpu().numpy()
+    img = np.rollaxis(img, 0, 3)[:, :, :3]
+    img = (img * 256).astype(np.uint8)
+
+    return img
 
 
 def lock_file(file):

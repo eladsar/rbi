@@ -16,7 +16,7 @@ from model import BehavioralNet, DuelNet
 from memory import ReplayBatchSampler, Memory, collate
 from agent import Agent
 from environment import Env
-from preprocess import get_tde_value, _get_mc_value, h_torch, hinv_torch, release_file, lock_file, _get_td_value
+from preprocess import get_tde_value, get_mc_value, h_torch, hinv_torch, release_file, lock_file, get_td_value, state_to_img
 import cv2
 import os
 import time
@@ -155,7 +155,7 @@ class RBIAgent(Agent):
 
             q = q.detach()
             v_eval = (q * pi).sum(dim=1).unsqueeze(1)
-            adv_eval = q - v_eval
+            # adv_eval = q - v_eval
             v_eval.squeeze_(1)
             v_target = (q_tag * pi_tag).sum(dim=1).detach()
 
@@ -164,13 +164,16 @@ class RBIAgent(Agent):
             is_value = tde ** (-self.priority_beta)
             is_value = is_value / is_value.max()
 
-            beta_mix = (1 - self.entropy_loss) * beta + self.entropy_loss / self.action_space
-            std_q = ((beta_mix * adv_eval ** 2).sum(dim=1)) ** 0.5
+            # beta_mix = (1 - self.entropy_loss) * beta + self.entropy_loss / self.action_space
+            # std_q = ((beta_mix * adv_eval ** 2).sum(dim=1)) ** 0.5
+            # is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** 0
 
-            is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** self.priority_alpha
+            v_diff = (q * (beta - pi)).mean().abs()
+            is_policy = ((v_diff + 0.01) / (v_eval.abs() + 0.01)) ** 0.6
+
             is_policy = is_policy / is_policy.max()
 
-            loss_value = ((q_a - r) ** 2 * is_value).mean()
+            loss_value = (((q_a - r) / (v_eval.abs() + 0.01)) ** 2 * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
             # Learning part
 
@@ -345,7 +348,7 @@ class RBIAgent(Agent):
 
                 self.frame += 1
 
-            mc_val = _get_mc_value(rewards, None, self.discount, None)
+            mc_val = get_mc_value(rewards, None, self.discount, None)
             q_val = np.array(q_val)
 
             print("sts | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | nst: %s\t| n %d\t| avg_r: %g\t| avg_f: %g" %
@@ -489,7 +492,7 @@ class RBIAgent(Agent):
                     rewards[i][-1][-1] -= self.termination_reward * int(env.k * self.skip >= self.max_length or env.score >= self.max_score)
 
                     td_val, t_val = get_tde_value(rewards[i], self.discount, self.n_steps)
-                    tde = np.abs(np.array(q_a[i]) - _get_td_value(rewards[i], v_target[i], self.discount, self.n_steps))
+                    tde = np.abs(np.array(q_a[i]) - get_td_value(rewards[i], v_target[i], self.discount, self.n_steps))
                     v_scale = np.concatenate(v_target[i])
 
                     tde = ((tde + 0.01) / (np.abs(v_scale) + 0.01)) ** self.priority_alpha
@@ -566,12 +569,12 @@ class RBIAgent(Agent):
 
         for i in range(n_tot):
 
-            if "gpu" in socket.gethostname():
-                log_dir = os.path.join("/home/dsi/elad/data/rbi/runs", "%s_%d" % (consts.exptime, i))
-            else:
-                log_dir = os.path.join("/tmp", "%s_%d" % (consts.exptime, i))
-
-            os.mkdir(log_dir)
+            # if "gpu" in socket.gethostname():
+            #     log_dir = os.path.join("/home/dsi/elad/data/rbi/runs", "%s_%d" % (consts.exptime, i))
+            # else:
+            #     log_dir = os.path.join("/tmp", "%s_%d" % (consts.exptime, i))
+            #
+            # os.mkdir(log_dir)
 
             self.env.reset()
 
@@ -582,49 +585,31 @@ class RBIAgent(Agent):
             while not self.env.t:
 
                 s = self.env.s.to(self.device)
-                aux = self.env.aux.to(self.device)
-
                 beta = self.beta_net(s)
+                beta = F.softmax(beta.detach(), dim=1)
 
-                beta_softmax = F.softmax(beta, dim=1)
+                _, _, _, q, _ = self.value_net(s, self.a_zeros, beta)
 
-                v, adv, _, q, _ = self.value_net(s, self.a_zeros, beta_softmax)
-                v = v.squeeze(0)
-                adv = adv.squeeze(0)
                 q = q.squeeze(0).data.cpu().numpy()
+                beta = beta.squeeze(0).data.cpu().numpy()
 
-                beta = beta.squeeze(0)
-                beta = F.softmax(beta, dim=0)
-                beta = beta.data.cpu().numpy()
+                pi = beta.copy()
+                adv = q.copy()
 
+                pi = self.epsilon * self.pi_rand + (1 - self.epsilon) * pi
+                pi = self.cmin * pi
 
-                if False:
+                Delta = 1 - self.cmin
+                while Delta > 0:
+                    a = np.argmax(adv)
+                    Delta_a = np.min((Delta, (self.cmax - self.cmin) * beta[a]))
+                    Delta -= Delta_a
+                    pi[a] += Delta_a
+                    adv[a] = -1e11
 
-                    pi = beta.copy()
-                    adv2 = adv.copy()
-
-                    rank = np.argsort(adv2)
-                    adv_rank = np.argsort(rank).astype(np.float)
-
-                    pi = self.cmin * pi
-
-                    Delta = 1 - self.cmin
-                    while Delta > 0:
-                        a = np.argmax(adv2)
-                        Delta_a = np.min((Delta, (self.cmax - self.cmin) * beta[a]))
-                        Delta -= Delta_a
-                        pi[a] += Delta_a
-                        adv2[a] = -1e11
-
-                    # pi_adv = 2 ** adv_rank * np.logical_or(adv2 >= 0, adv_rank == (self.action_space - 1))
-                    pi_adv = 1. * np.logical_or(adv >= 0, adv_rank == (self.action_space - 1))
-                    pi_adv = pi_adv / (np.sum(pi_adv))
-
-                    pi = (1 - self.mix) * pi + self.mix * pi_adv
-                    pi_mix = self.epsilon * self.pi_rand + (1 - self.eps_pre) * pi
-
-                else:
-                    pi = beta
+                pi_greed = np.zeros(self.action_space)
+                pi_greed[np.argmax(q)] = 1
+                pi = (1 - self.mix) * pi + self.mix * pi_greed
 
                 pi = pi.clip(0, 1)
                 pi = pi / pi.sum()
@@ -633,23 +618,15 @@ class RBIAgent(Agent):
                 self.env.step(a)
 
                 # time.sleep(0.1)
+                img = state_to_img(s)
 
-                img = s.squeeze(0).data[:3].cpu().numpy()
-                img = np.rollaxis(img, 0, 3)[:, :, :3]
-                img = (img * 256).astype(np.uint8)
+                # cv2.imwrite(os.path.join(log_dir, "%d_%d_%d.png" % (self.env.k, a, self.env.score)), img)
 
-                cv2.imwrite(os.path.join(log_dir, "%d_%d_%d.png" % (self.env.k, a, self.env.score)), img)
+                v = (pi * q).sum()
+                adv = q - v
 
-                yield {'score': self.env.score,
-                       "beta": pi,
-                       "v": v.data.cpu().numpy(),
-                       "q": q,
-                       "aux": aux.squeeze(0).data.cpu().numpy(),
-                       "adv": adv.data.cpu().numpy(),
-                       "o": img,
-                       'frames': self.env.k,
-                       "actions": self.env.action_meanings,
-                       "a": a
+                yield {'score': self.env.score, "beta": pi, "v": v, "q": q, "adv": adv, "s": img, 'frames': self.env.k,
+                       "actions": self.env.action_meanings, "a": a
                        }
 
         raise StopIteration

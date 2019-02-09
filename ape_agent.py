@@ -14,7 +14,7 @@ from model import DuelNet
 from memory import ReplayBatchSampler, Memory, collate
 from agent import Agent
 from environment import Env
-from preprocess import get_tde_value, lock_file, release_file, h_torch, hinv_torch, _get_mc_value, _get_td_value
+from preprocess import get_tde_value, lock_file, release_file, h_torch, hinv_torch, get_mc_value, get_td_value, state_to_img
 import cv2
 import os
 import time
@@ -263,7 +263,7 @@ class ApeAgent(Agent):
 
                 self.frame += 1
 
-            mc_val = _get_mc_value(rewards, None, self.discount, None)
+            mc_val = get_mc_value(rewards, None, self.discount, None)
             q_val = np.array(q_val)
 
             yield {'score': self.env.score,
@@ -376,7 +376,7 @@ class ApeAgent(Agent):
                 if env.t:
 
                     td_val, t_val = get_tde_value(rewards[i], self.discount, self.n_steps)
-                    tde = np.abs(np.array(q_a[i]) - _get_td_value(rewards[i], v_target[i], self.discount, self.n_steps))
+                    tde = np.abs(np.array(q_a[i]) - get_td_value(rewards[i], v_target[i], self.discount, self.n_steps))
                     v_scale = np.concatenate(v_target[i])
 
                     tde = ((tde + 0.01) / (np.abs(v_scale) + 0.01)) ** self.priority_alpha
@@ -449,28 +449,25 @@ class ApeAgent(Agent):
     def demonstrate(self, n_tot):
 
         self.value_net.eval()
+        pi_rand = np.ones(self.action_space) / self.action_space
+        pi_rand = torch.FloatTensor(pi_rand).unsqueeze(0).to(self.device)
 
         for i in range(n_tot):
 
             self.env.reset()
-
-            # here there is a problem when there is a varying/increasing life counter as in mspacman
 
             choices = np.arange(self.action_space, dtype=np.int)
 
             while not self.env.t:
 
                 s = self.env.s.to(self.device)
-                aux = self.env.aux.to(self.device)
+                _, _, _, q, _ = self.value_net(s, self.a_zeros, pi_rand)
 
-                v, adv, _, q, _ = self.value_net(s, self.a_zeros)
-                v = v.squeeze(0)
-                adv = adv.squeeze(0)
                 q = q.squeeze(0).data.cpu().numpy()
-                beta = np.zeros(self.action_space)
-                beta[np.argmax(q)] = 1
 
-                pi = beta * (1 - 0.00164) + 0.00164 * self.pi_rand
+                pi_greed = np.zeros(self.action_space)
+                pi_greed[np.argmax(q)] = 1
+                pi = self.epsilon * self.pi_rand + (1 - self.epsilon) * pi_greed
 
                 pi = pi.clip(0, 1)
                 pi = pi / pi.sum()
@@ -478,15 +475,13 @@ class ApeAgent(Agent):
                 a = np.random.choice(choices, p=pi)
                 self.env.step(a)
 
-                yield {'score': self.env.score,
-                       "beta": beta,
-                       "v": v.data.cpu().numpy(),
-                       "q": q,
-                       "aux": aux.squeeze(0).data.cpu().numpy(),
-                       "adv": adv.data.cpu().numpy(),
-                       "o": s.squeeze(0).data[:3].cpu().numpy(),
-                       'frames': self.env.k,
-                       "actions": self.env.action_meanings,
+                img = state_to_img(s)
+
+                v = (pi * q).sum()
+                adv = q - v
+
+                yield {'score': self.env.score, "beta": pi, "v": v, "q": q, "adv": adv, "s": img, 'frames': self.env.k,
+                       "actions": self.env.action_meanings, "a": a
                        }
 
         raise StopIteration

@@ -16,7 +16,7 @@ if [ $game = "breakout" ]; then
     tensor="--no-tensorboard"
 fi
 
-args="--algorithm=rbi --n-steps=4 --no-reward-shape --no-dropout --no-infinite-horizon --target=td \
+args="--algorithm=rbi --n-steps=3 --no-reward-shape --no-dropout --no-infinite-horizon \
 --batch=128 --hidden-features=512 --clip=1 --discount=0.99 \
 --termination-reward=0 --friction-reward=0 --priority-alpha=0.6 --priority-beta=0.4 --epsilon-a=0.001 \
 --epsilon=0.00164 --cpu-workers=48 \

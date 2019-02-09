@@ -48,10 +48,6 @@ class Agent(object):
         self.min_loop = 1. / 44
         self.hidden_state = args.hidden_features_rnn
 
-        self.seq_length = args.seq_length
-        if args.target == 'tde':
-            self.seq_length += self.n_steps
-
         self.burn_in = args.burn_in
         self.seq_overlap = args.seq_overlap
 
