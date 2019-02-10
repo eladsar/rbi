@@ -25,9 +25,9 @@ def main():
             logger.info("Evaluate final performance")
             exp.play()
 
-        elif args.evaluate:
+        elif args.evaluate: # elad
             logger.info("Enter RBI playing Session, I hope it goes well")
-            exp.choose()
+            exp.evaluate()
 
         elif args.multiplay:
             logger.info("Start a multiplay Session")

@@ -178,7 +178,8 @@ class RBIAgent(Agent):
 
             is_policy = is_value
 
-            loss_value = ((q_a - r) ** 2 * is_value).mean()
+            # loss_value = ((q_a - r) ** 2 * is_value).mean()
+            loss_value = (self.q_loss(q_a, r) * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
 
             # Learning part
@@ -441,6 +442,11 @@ class RBIAgent(Agent):
             adv = adv.data.cpu().numpy()
             rank = np.argsort(adv, axis=1)
 
+            mp_trigger = np.logical_and(
+                np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
+                explore_threshold >= 0)
+            exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
+
             if self.n_offset >= self.random_initialization:
 
                 pi = (1 - self.epsilon) * beta + self.epsilon / self.action_space
@@ -514,7 +520,7 @@ class RBIAgent(Agent):
                     trajectory[i].append(episode_df)
 
                     print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
-                          (self.frame, env.score, env.k, mp_explore[i],  np.sign(explore_threshold[i]), 1, time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
+                          (self.frame, env.score, env.k, mp_explore[i],  np.sign(explore_threshold[i]), mp_trigger[i], time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
 
                     env.reset()
                     episode[i] = []

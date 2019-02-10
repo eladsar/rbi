@@ -5,6 +5,8 @@ game=$2
 resume=$3
 aux="${@:4}"
 
+loc=`dirname "%0"`
+
 if [ $resume != "new" ]; then
     args="--resume=$3 --load-last-model"
     echo "Resume Experiment: $identifier $3"
@@ -13,7 +15,7 @@ else
     echo "New Experiment"
 fi
 
-CUDA_VISIBLE_DEVICES=0, python main.py --learn --identifier=$identifier --game=$game $args $aux --algorithm=ape \
+CUDA_VISIBLE_DEVICES=0, $loc/python main.py --learn --identifier=$identifier --game=$game $args $aux --algorithm=ape \
 --n-steps=3 --no-reward-shape --no-dropout --no-infinite-horizon \
 --batch=128 --hidden-features=512 --clip=1 --discount=0.99 \
 --termination-reward=0 --friction-reward=0 --priority-alpha=0.6 --priority-beta=0.4 --epsilon-a=0.001 \
