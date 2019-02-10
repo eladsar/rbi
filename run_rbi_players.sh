@@ -44,6 +44,6 @@ CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --re
 CUDA_VISIBLE_DEVICES=3, python main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --actor-index=15 $args &
 
 CUDA_VISIBLE_DEVICES=3, python main.py --clean --identifier=$identifier --resume=$resume --load-last-model --game=$game $args &
-CUDA_VISIBLE_DEVICES=3, python main.py --choose --identifier=$identifier --resume=$resume --load-last-model --game=$game --play-episodes-interval=16 --wait=150 $tensor $args &
-CUDA_VISIBLE_DEVICES=3, python main.py --choose --identifier=$identifier --resume=$resume --load-last-model --game=$game --play-episodes-interval=16 --wait=300 $tensor $args &
+CUDA_VISIBLE_DEVICES=3, python main.py --evaluate --identifier=$identifier --resume=$resume --load-last-model --game=$game --play-episodes-interval=16 --wait=150 $tensor $args &
+CUDA_VISIBLE_DEVICES=3, python main.py --evaluate --identifier=$identifier --resume=$resume --load-last-model --game=$game --play-episodes-interval=16 --wait=300 $tensor $args &
 

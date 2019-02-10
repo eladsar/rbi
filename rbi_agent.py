@@ -138,6 +138,8 @@ class RBIAgent(Agent):
 
         for n, sample in tqdm(enumerate(self.train_loader)):
 
+            n = self.n_offset + n + 1
+
             s = sample['s'].to(self.device)
             s_tag = sample['s_tag'].to(self.device)
             a = sample['a'].to(self.device).unsqueeze_(1)
@@ -190,7 +192,7 @@ class RBIAgent(Agent):
             self.optimizer_value.step()
 
             # collect actions statistics
-            if not (n + 1 + self.n_offset) % 50:
+            if not n % 50:
 
                 a_index_np = a[:, 0].data.cpu().numpy()
 
@@ -228,15 +230,15 @@ class RBIAgent(Agent):
                 results['loss_std'].append(0)
                 results['n'].append(n)
 
-                if not (n + 1 + self.n_offset) % self.update_memory_interval:
+                if not n % self.update_memory_interval:
                     # save agent state
-                    self.save_checkpoint(self.snapshot_path, {'n': self.n_offset + n + 1})
+                    self.save_checkpoint(self.snapshot_path, {'n': n})
 
-                if not (n+1) % self.update_target_interval:
+                if not n % self.update_target_interval:
                     # save agent state
                     self.target_net.load_state_dict(self.value_net.state_dict())
 
-                if not (n + 1 + self.n_offset) % n_interval:
+                if not n % n_interval:
                     results['act_diff'] = np.concatenate(results['act_diff'])
                     results['a_agent'] = np.concatenate(results['a_agent'])
                     results['adv_a'] = np.concatenate(results['adv_a'])
@@ -250,7 +252,7 @@ class RBIAgent(Agent):
                     self.value_net.train()
                     results = {key: [] for key in results}
 
-                    if (n + self.n_offset) >= n_tot:
+                    if n >= n_tot:
                         break
 
     def play(self, n_tot, save=True, load=True, fix=False):

@@ -22,11 +22,11 @@ def main():
             exp.learn()
 
         elif args.play:
-            logger.info("Enter RBI playing Session, I hope it goes well")
+            logger.info("Evaluate final performance")
             exp.play()
 
-        elif args.choose:
-            logger.info("Choosing best player")
+        elif args.evaluate:
+            logger.info("Enter RBI playing Session, I hope it goes well")
             exp.choose()
 
         elif args.multiplay:

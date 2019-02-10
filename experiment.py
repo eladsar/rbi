@@ -273,7 +273,7 @@ class Experiment(object):
         agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint, choose=True)
         agent.clean()
 
-    def choose(self):
+    def evaluate(self):
 
         uuid = "%012d" % np.random.randint(1e12)
         agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint, choose=True)
@@ -317,7 +317,7 @@ class Experiment(object):
 
         print("Here")
 
-        while True:
+        while agent.n_offset <= args.n_tot:
 
             # load model
             try:
