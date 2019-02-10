@@ -533,7 +533,4 @@ class Experiment(object):
         player = agent.demonstrate(128)
 
         for i, step in enumerate(player):
-            # print("here %d" % i)
             yield step
-
-            # print("out")
