@@ -48,6 +48,8 @@ class ApeAgent(Agent):
         self.pi_rand = np.ones(self.action_space) / self.action_space
         self.pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(self.batch, 1).to(self.device)
 
+        self.q_loss = nn.SmoothL1Loss(reduction='none')
+
         if player:
 
             # play variables
@@ -138,7 +140,7 @@ class ApeAgent(Agent):
 
             is_value = tde ** (-self.priority_beta)
             is_value = is_value / is_value.max()
-            loss_value = ((q_a - r) ** 2 * is_value).mean()
+            loss_value = (self.q_loss(q_a, r) * is_value).mean()
 
             # Learning part
 
@@ -283,6 +285,7 @@ class ApeAgent(Agent):
         player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
         mp_explore = 0.4 ** (1 + 7 * player_i)
         exploration = np.repeat(np.expand_dims(mp_explore, axis=1), self.action_space, axis=1)
+        explore_threshold = player_i
 
         mp_env = [Env() for _ in range(n_players)]
         self.frame = 0
@@ -352,6 +355,11 @@ class ApeAgent(Agent):
 
             v_expected = (q * pi).sum(axis=1)
 
+            mp_trigger = np.logical_and(
+                np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
+                explore_threshold >= 0)
+            exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
+
             for i in range(n_players):
 
                 a = np.random.choice(self.choices, p=pi_mix[i])
@@ -390,9 +398,10 @@ class ApeAgent(Agent):
 
                     trajectory[i].append(episode_df)
 
-                    print("rbi | st: %d | sc: %d | e: %g | n-step: %s | n %d | avg: %g" %
-                          (self.frame, env.score, mp_explore[i], str(self.n_steps), self.n_offset,
-                           self.behavioral_avg_score))
+                    print("ape | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
+                        (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), mp_trigger[i],
+                         time.time() - self.start_time, self.n_offset, self.behavioral_avg_score,
+                         self.behavioral_avg_frame))
 
                     env.reset()
                     episode[i] = []

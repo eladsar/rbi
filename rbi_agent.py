@@ -168,17 +168,10 @@ class RBIAgent(Agent):
             is_value = tde ** (-self.priority_beta)
             is_value = is_value / is_value.max()
 
-            # beta_mix = (1 - self.entropy_loss) * beta + self.entropy_loss / self.action_space
-            # std_q = ((beta_mix * adv_eval ** 2).sum(dim=1)) ** 0.5
-            # is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** 0
+            v_diff = (q * (beta - pi)).mean().abs()
+            is_policy = ((v_diff + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_alpha
+            is_policy = is_policy / is_policy.max()
 
-            # v_diff = (q * (beta - pi)).mean().abs()
-            # is_policy = ((v_diff + 0.01) / (v_eval.abs() + 0.01)) ** 0.6
-            # is_policy = is_policy / is_policy.max()
-
-            is_policy = is_value
-
-            # loss_value = ((q_a - r) ** 2 * is_value).mean()
             loss_value = (self.q_loss(q_a, r) * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
 
@@ -384,14 +377,12 @@ class RBIAgent(Agent):
 
         a_zeros_mp = self.a_zeros.repeat(n_players, 1)
         mp_pi_rand = np.repeat(np.expand_dims(self.pi_rand, axis=0), n_players, axis=0)
-        exploration = np.repeat(np.expand_dims(mp_explore, axis=1), self.action_space, axis=1)
 
         range_players = np.arange(n_players)
         rewards = [[[]] for _ in range(n_players)]
         v_target = [[[]] for _ in range(n_players)]
         episode = [[] for _ in range(n_players)]
         q_a = [[] for _ in range(n_players)]
-        v_diff = [[] for _ in range(n_players)]
         image_dir = ['' for _ in range(n_players)]
         trajectory = [[] for _ in range(n_players)]
         screen_dir = [os.path.join(self.explore_dir, "screen")] * n_players
@@ -476,7 +467,6 @@ class RBIAgent(Agent):
             pi = pi.astype(np.float32)
 
             v_expected = (q * pi).sum(axis=1)
-            v_err = np.abs((q * beta).sum(axis=1) - v_expected)
 
             for i in range(n_players):
 
@@ -499,7 +489,6 @@ class RBIAgent(Agent):
                 rewards[i][-1].append(env.r)
                 v_target[i][-1].append(v_expected[i])
                 q_a[i].append(q[i][a])
-                v_diff[i].append(v_err[i])
 
                 if env.t:
 
@@ -510,7 +499,7 @@ class RBIAgent(Agent):
                     tde = np.abs(np.array(q_a[i]) - get_td_value(rewards[i], v_target[i], self.discount, self.n_steps))
                     v_scale = np.concatenate(v_target[i])
 
-                    tde = ((tde + v_diff[i] + 0.01) / (np.abs(v_scale) + 0.01)) ** self.priority_alpha
+                    tde = ((tde + 0.01) / (np.abs(v_scale) + 0.01)) ** self.priority_alpha
 
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
@@ -525,7 +514,6 @@ class RBIAgent(Agent):
                     env.reset()
                     episode[i] = []
                     q_a[i] = []
-                    v_diff[i] = []
                     rewards[i] = [[]]
                     v_target[i] = [[]]
                     lives[i] = env.lives

@@ -224,8 +224,8 @@ class Consts(object):
                          ('pi', np.float32, len(np.nonzero(actions[args.game])[0])),
                          ('pi_tag', np.float32, len(np.nonzero(actions[args.game])[0])),])
 
-    outdir = os.path.join(base_dir, 'results')
-    logdir = os.path.join(base_dir, 'logs')
+    outdir = os.path.join(args.base_dir, 'results')
+    logdir = os.path.join(args.base_dir, 'logs')
     indir = os.path.join('/dev/shm/', username, 'rbi')
 
 
