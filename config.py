@@ -3,9 +3,10 @@ import time
 import numpy as np
 import socket
 import os
+import pwd
 
 parser = argparse.ArgumentParser(description='atari')
-username = os.getlogin()
+username = pwd.getpwuid(os.geteuid()).pw_name
 
 if "gpu" in socket.gethostname():
     base_dir = os.path.join('/home/dsi/', username, 'data/rbi')
