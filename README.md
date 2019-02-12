@@ -15,26 +15,26 @@ Currently, supported environment is ALE
 A distributed RL agent is composed of a single learning process and multiple actor process.
 Therefore, we need to execute two bash scripts one for the learner and one for the multiple actors.
 
-chose \<algorithm> as one of rbi|ape|ppo|r2d2|rbi_rnn 
+choose \<algorithm> as one of rbi|ape|ppo|r2d2|rbi_rnn 
 
 ### Run Learner:
 
-sh run_\<algorithm>_learner.sh \<identifier> \<game> \<new|resume>
+sh learner.sh \<algorithm> \<identifier> \<game> \<new|resume>
 
 resume is a number of experiment to resume.
 For example:
 
-sh run_rbi_players.sh qbert_debug qbert new
+sh learner.sh rbi qbert_debug qbert new
 
 starts a new experiment, while:
 
-sh run_rbi_players.sh qbert_debug qbert 3
+sh learner.sh rbi qbert_debug qbert 3
 
 resumes experiment 3 with identifier qbert_debug
 
 ### Run Actors:
 
-sh run_\<algorithm>_player.sh \<identifier> \<game> \<resume>
+sh actors.sh \<algorithm> \<identifier> \<game> \<resume>
 
 ### Run Evaluation player:
 
