@@ -202,7 +202,6 @@ class Experiment(object):
             score = player['high'] if player else 0
             agent.save_checkpoint(self.checkpoint, {'n': n + n_offset, 'score': score})
 
-
         return agent
 
     def get_player(self, agent):
@@ -317,7 +316,7 @@ class Experiment(object):
 
         print("Here")
 
-        while agent.n_offset <= args.n_tot:
+        while True:
 
             # load model
             try:
@@ -403,6 +402,11 @@ class Experiment(object):
                     np.save(stat_filename, stats)
 
                 kk += 1
+
+            if agent.n_offset >= args.n_tot:
+                break
+
+        print("End of evaluation")
 
     def print_actions_statistics(self, a_agent, a_player, n, Hbeta, Hpi, adv_a, q_a, r_mc):
 

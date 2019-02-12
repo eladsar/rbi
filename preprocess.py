@@ -44,6 +44,7 @@ friction = args.friction_reward
 termination_reward = args.termination_reward
 reward_shape = args.reward_shape
 
+
 def convert_screen_to_rgb(img, resize=False):
     img = cv2.cvtColor(img.numpy(), img_gray2rgb)
     #
@@ -186,6 +187,7 @@ def get_td_value(rewards, v_target, discount, n_steps):
 
     return np.concatenate(values).astype(np.float32)
 
+
 def get_gae_est(rewards, v_target, discount):
 
     lives = len(rewards)
@@ -282,6 +284,7 @@ def get_tde_value(rewards, discount, n_steps):
 
     return np.concatenate(values).astype(np.float32), np.concatenate(terminals).astype(np.float32)
 
+
 def get_tde(rewards, v_target, discount, n_steps, q_expected):
 
     # tde calculations
@@ -296,6 +299,7 @@ def get_tde(rewards, v_target, discount, n_steps, q_expected):
     # up to here
 
     return priority_eta * max_tde + (1 - priority_eta) * avg_td
+
 
 def get_gtd_value(rewards, v_target, discount, mu, sigma):
 

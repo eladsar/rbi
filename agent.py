@@ -4,6 +4,7 @@ from config import consts, args
 import torch
 import time
 import shutil
+import itertools
 
 class Agent(object):
 
@@ -128,12 +129,12 @@ class Agent(object):
 
     def clean(self):
 
-        while True:
+        screen_dir = os.path.join(self.explore_dir, "screen")
+        trajectory_dir = os.path.join(self.explore_dir, "trajectory")
+
+        for i in itertools.count():
 
             time.sleep(2)
-
-            screen_dir = os.path.join(self.explore_dir, "screen")
-            trajectory_dir = os.path.join(self.explore_dir, "trajectory")
 
             try:
                 del_inf = np.load(os.path.join(self.list_dir, "old_explore.npy"))
@@ -152,3 +153,13 @@ class Agent(object):
 
             for ep in episode_list:
                 shutil.rmtree(os.path.join(screen_dir, str(ep)))
+
+            if not i % 50:
+                try:
+                    self.load_checkpoint(self.snapshot_path)
+                    if self.n_offset >= args.n_tot:
+                        break
+                except:
+                    pass
+
+        shutil.rmtree(self.root_dir)

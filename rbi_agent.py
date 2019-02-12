@@ -9,8 +9,6 @@ import torch.nn as nn
 
 from config import consts, args
 import psutil
-import socket
-
 from model import BehavioralNet, DuelNet
 
 from memory import ReplayBatchSampler, Memory, collate
@@ -20,7 +18,6 @@ from preprocess import get_tde_value, get_mc_value, h_torch, hinv_torch, release
 import cv2
 import os
 import time
-import shutil
 
 imcompress = cv2.IMWRITE_PNG_COMPRESSION
 compress_level = 2
@@ -168,9 +165,11 @@ class RBIAgent(Agent):
             is_value = tde ** (-self.priority_beta)
             is_value = is_value / is_value.max()
 
-            v_diff = (q * (beta - pi)).mean().abs()
-            is_policy = ((v_diff + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_alpha
-            is_policy = is_policy / is_policy.max()
+            is_policy = is_value
+
+            # v_diff = (q * (beta - pi)).mean().abs()
+            # is_policy = ((v_diff + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_alpha
+            # is_policy = is_policy / is_policy.max()
 
             loss_value = (self.q_loss(q_a, r) * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()

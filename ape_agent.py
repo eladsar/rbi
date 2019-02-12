@@ -8,7 +8,6 @@ from tqdm import tqdm
 import psutil
 
 from config import consts, args
-
 from model import DuelNet
 
 from memory import ReplayBatchSampler, Memory, collate
@@ -18,7 +17,6 @@ from preprocess import get_tde_value, lock_file, release_file, h_torch, hinv_tor
 import cv2
 import os
 import time
-import shutil
 
 imcompress = cv2.IMWRITE_PNG_COMPRESSION
 compress_level = 2

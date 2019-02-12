@@ -6,6 +6,7 @@ import numpy as np
 
 action_space = len(np.nonzero(consts.actions[args.game])[0])
 
+
 class DuelNet(nn.Module):
 
     def __init__(self):
