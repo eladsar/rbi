@@ -343,6 +343,15 @@ def get_gtd_value(rewards, v_target, discount, mu, sigma):
     return np.concatenate(values).astype(np.float32)
 
 
+if args.target == 'td':
+    get_expected_value = get_td_value
+elif args.target == 'mc':
+    get_expected_value = get_mc_value
+elif args.target == 'tde':
+    get_expected_value = get_truncated_value
+else:
+    raise NotImplementedError
+
 def state_to_img(s):
 
     img = s.squeeze(0).data[:3].cpu().numpy()

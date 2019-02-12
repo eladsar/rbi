@@ -53,6 +53,7 @@ boolean_feature("dropout", False, "Use Dropout layer")
 boolean_feature("reward-shape", False, "Shape reward with sign(r)*log(1+|r|)")
 boolean_feature("infinite-horizon", False, "Don't end episode in EOL")
 boolean_feature("frame-limit", True, "Limit episode frames")
+parser.add_argument('--target', type=str, default='tde', help='Target method [td|tde|mc]')
 
 # parameters
 parser.add_argument('--resume', type=int, default=-1, help='Resume experiment number, set -1 for last experiment')

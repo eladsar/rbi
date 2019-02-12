@@ -11,6 +11,8 @@ import time
 from config import consts, args
 from rbi_agent import RBIAgent
 from ape_agent import ApeAgent
+from r2d2_agent import R2D2Agent
+from rbi_rnn_agent import RBIRNNAgent
 
 from logger import logger
 from distutils.dir_util import copy_tree
@@ -113,6 +115,10 @@ class Experiment(object):
             return RBIAgent
         elif args.algorithm == "ape":
             return ApeAgent
+        elif args.algorithm == "r2d2":
+            return R2D2Agent
+        elif args.algorithm == "rbi_rnn":
+            return RBIRNNAgent
         else:
             return NotImplementedError
 

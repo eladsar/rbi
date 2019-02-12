@@ -1,5 +1,3 @@
-# R2D2 implementation
-
 import torch
 import torch.utils.data
 import torch.utils.data.sampler
@@ -7,18 +5,18 @@ import torch.optim.lr_scheduler
 import numpy as np
 from tqdm import tqdm
 from torch.nn import functional as F
-import torch.nn as nn
 
 from config import consts, args
 import psutil
 import socket
+import pandas as pd
 
 from model import BehavioralRNN, DuelRNN
 
 from memory_rnn import ObservationsRNNMemory, ObservationsRNNBatchSampler
 from agent import Agent
 from environment import Env
-from preprocess import release_file, lock_file, get_mc_value, get_td_value, h_torch, hinv_torch, get_expected_value
+from preprocess import release_file, lock_file, get_rho_is, get_td_value, get_mc_value, h_torch, hinv_torch, get_expected_value
 import cv2
 import os
 import time
@@ -29,24 +27,23 @@ compress_level = 2
 mem_threshold = consts.mem_threshold
 
 
-class R2D2Agent(Agent):
+class RBIRNNAgent(Agent):
 
     def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
 
         print("Learning with RBIRNNAgent")
-        super(R2D2Agent, self).__init__(root_dir, checkpoint)
+        super(RBIRNNAgent, self).__init__(root_dir, checkpoint)
 
-        self.value_net = DuelRNN()
-        if torch.cuda.device_count() > 1:
-            self.value_net = nn.DataParallel(self.value_net)
-        self.value_net.to(self.device)
+        self.beta_net = BehavioralRNN().to(self.device)
+        self.value_net = DuelRNN().to(self.device)
 
         self.pi_rand = np.ones(self.action_space) / self.action_space
-        self.pi_rand_seq = torch.ones(self.batch, self.seq_length, self.action_space,  dtype=torch.float).to(self.device) / self.action_space
-        self.pi_rand_bi = torch.ones(self.batch, self.burn_in, self.action_space, dtype=torch.float).to(self.device) / self.action_space
+        self.pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(self.batch, 1).to(self.device)
 
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
-        self.a_zeros_bi = torch.zeros(self.batch, self.burn_in, 1, dtype=torch.long).to(self.device)
+        self.a_zeros_batch = self.a_zeros.repeat(self.batch, 1)
+
+        self.rec_type = consts.rec_type
 
         if player:
 
@@ -67,6 +64,7 @@ class R2D2Agent(Agent):
 
         else:
 
+            # self.target_net = DuelNet().to(self.device)
             # datasets
             self.train_dataset = ObservationsRNNMemory(root_dir)
             self.train_sampler = ObservationsRNNBatchSampler(root_dir)
@@ -92,20 +90,18 @@ class R2D2Agent(Agent):
         # configure learning
 
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
-        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.001, eps=1e-3, weight_decay=0)
+        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.0001, eps=1e-3, weight_decay=0)
+        self.optimizer_beta = torch.optim.Adam(self.beta_net.parameters(), lr=0.0001, eps=1e-3, weight_decay=0)
+
         self.n_offset = 0
 
     def save_checkpoint(self, path, aux=None):
 
-        if torch.cuda.device_count() > 1:
-            state = {'value_net': self.value_net.module.state_dict(),
-                     'optimizer_value': self.optimizer_value.state_dict(),
-                     'aux': aux}
-        else:
-            state = {'value_net': self.value_net.state_dict(),
-                     'optimizer_value': self.optimizer_value.state_dict(),
-                     'aux': aux}
-
+        state = {'beta_net': self.beta_net.state_dict(),
+                 'value_net': self.value_net.state_dict(),
+                 'optimizer_value': self.optimizer_value.state_dict(),
+                 'optimizer_beta': self.optimizer_beta.state_dict(),
+                 'aux': aux}
 
         torch.save(state, path)
 
@@ -113,62 +109,98 @@ class R2D2Agent(Agent):
 
         state = torch.load(path, map_location="cuda:%d" % self.cuda_id)
 
-        if torch.cuda.device_count() > 1:
-            self.value_net.module.load_state_dict(state['value_net'])
-            self.optimizer_value.load_state_dict(state['optimizer_value'])
-        else:
-            self.value_net.load_state_dict(state['value_net'])
-            self.optimizer_value.load_state_dict(state['optimizer_value'])
-
-
+        self.beta_net.load_state_dict(state['beta_net'])
+        self.value_net.load_state_dict(state['value_net'])
+        self.optimizer_beta.load_state_dict(state['optimizer_beta'])
+        self.optimizer_value.load_state_dict(state['optimizer_value'])
         self.n_offset = state['aux']['n']
+        try:
+            self.behavioral_avg_score = state['aux']['score']
+        except:
+            pass
+
         return state['aux']
 
     def learn(self, n_interval, n_tot):
 
-        target_net = DuelRNN()
-        if torch.cuda.device_count() > 1:
-            target_net = nn.DataParallel(target_net)
-        target_net.to(self.device)
-
+        target_net = DuelRNN().to(self.device)
         target_net.load_state_dict(self.value_net.state_dict())
 
+        self.beta_net.train()
         self.value_net.train()
         target_net.eval()
 
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
-                   'a_player': [], 'loss_std': [], 'mc_val': [], "Hbeta": [], "Hpi": [], "adv_a": [], "q_a": [], 'image': []}
+                   'a_player': [], 'loss_std': [], 'mc_val': [], "Hbeta": [], "Hpi": [], "adv_a": [], "q_a": []}
 
         for n, sample in tqdm(enumerate(self.train_loader)):
 
             s = sample['s'].to(self.device)
             a = sample['a'].to(self.device).unsqueeze_(2)
+
             s_bi = sample['s_bi'].to(self.device)
+            a_bi = sample['a_bi'].to(self.device).unsqueeze_(2)
+
             r = sample['r'].to(self.device)
-            t = sample['t'].to(self.device)
-            R = sample['rho_q'].to(self.device)
-            tde = sample['tde'].to(self.device)
+            rho_q = sample['rho_q'].to(self.device)
+            rho_v = sample['rho_v'].to(self.device)
+            pi = sample['pi'].to(self.device)
 
             # burn in
-            h_q = sample['h_q'].to(self.device)
 
-            _, _, h_q = self.value_net(s_bi, self.a_zeros_bi, self.pi_rand_bi, h_q)
+            h_q = sample['h_q'].to(self.device).unsqueeze_(0)
+            h_beta = sample['h_beta'].to(self.device).unsqueeze_(0)
 
-            q, q_a, _ = self.value_net(s, a, self.pi_rand_seq, h_q)
-            a_tag = torch.argmax(q, dim=2).detach().unsqueeze(2)
+            beta, h_beta = self.beta_net(s_bi, h_beta)
+            beta = F.softmax(beta.detach(), dim=2)
 
-            _, q_target, _ = target_net(s, a_tag, self.pi_rand_seq, h_q)
-            q_target = q_target.detach()
+            _, _, _, _, _, h_q = self.value_net(s_bi, a_bi, beta, h_q)
 
-            r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
+            # _, _, _, _, q_a_bi, h_q = target_net(s_bi, a_bi, beta, h_q)
 
-            is_value = (1 / (tde + self.epsilon_a)) ** self.priority_beta
+            # Behavioral nets
+            beta, _ = self.beta_net(s, h_beta)
+            beta_log = F.log_softmax(beta, dim=2)
+            beta = F.softmax(beta.detach(), dim=2)
+
+            v_target, _, _, _, _, _ = target_net(s, a, beta, h_q)
+
+            v_target = v_target.squeeze(2).detach()
+            r = h_torch(r[:, :-self.n_steps] + self.discount ** self.n_steps * hinv_torch(v_target[:, self.n_steps:]))
+
+
+            # r = h_torch((hinv_torch(torch.cat((q_a_bi[:, -self.n_steps:], q_a_target[:, :-self.n_steps]), dim=1)) - r) / (
+            #             self.discount ** self.n_steps))
+            # r.detach_()
+
+            v, adv_eval, adv_a, _, q_a, _ = self.value_net(s, a, beta, h_q)
+
+            v = v.squeeze(2)
+            v_eval = v.detach()
+            q_a_eval = q_a.detach()
+            adv_eval = adv_eval.detach()
+
+            is_value = (((r - q_a_eval[:, :-self.n_steps]).abs() + 0.01) / (v_eval[:, :-self.n_steps].abs() + 0.01)) ** self.priority_beta
+            # is_value = (((r - q_a_eval).abs() + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_beta
             is_value = is_value / is_value.mean()
-            is_value = is_value.unsqueeze(1).repeat(1, self.seq_length - self.n_steps)
 
-            loss_value = ((q_a[:, :-self.n_steps] - r) ** 2 * is_value * (1 - t[:, :-self.n_steps])).mean()
+            beta_mix = (1 - self.entropy_loss) * beta + self.entropy_loss / self.action_space
+            std_q = ((beta_mix * adv_eval ** 2).sum(dim=2)) ** 0.5
+            is_policy = ((std_q + 0.1) / (v_eval.abs() + 0.1)) ** self.priority_beta
+            is_policy = is_policy / is_policy.mean()
+
+            # loss_value = ((v_eval * (1 - rho_v) + v * rho_v + adv_a - r) ** 2 * is_value * rho_q).mean()
+            loss_value = ((v_eval[:, :-self.n_steps] * (1 - rho_v[:, :-self.n_steps])
+                           + v[:, :-self.n_steps] * rho_v[:, :-self.n_steps]
+                           + adv_a[:, :-self.n_steps] - r) ** 2 * is_value * rho_q[:, :-self.n_steps]).mean()
+
+            loss_beta = ((-pi * beta_log).sum(dim=2) * is_policy).mean()
 
             # Learning part
+
+            self.optimizer_beta.zero_grad()
+            loss_beta.backward()
+            self.optimizer_beta.step()
 
             self.optimizer_value.zero_grad()
             loss_value.backward()
@@ -176,41 +208,50 @@ class R2D2Agent(Agent):
 
             # collect actions statistics
 
-            if not (n + 1 + self.n_offset) % 10:
+            if not (n + 1 + self.n_offset) % 50:
 
-                if not (n + 1 + self.n_offset) % 50:
+                a_index_np = a.view(-1).data.cpu().numpy()
 
-                    a_index_np = a[:, :-self.n_steps, 0].contiguous().view(-1).data.cpu().numpy()
+                # avoid zero pi
+                pi = pi.view(-1, self.action_space).clamp(min=1e-4, max=1)
+                pi /= pi.sum(dim=1).unsqueeze(1).repeat(1, self.action_space)
 
-                    q_a = q_a[:, :-self.n_steps].contiguous().view(-1).data.cpu().numpy()
-                    r = r.view(-1).data.cpu().numpy()
+                pi_log = pi.log()
+                beta_soft = F.softmax(beta.view(-1, self.action_space), dim=1).detach()
 
-                    _, beta_index = q[:, :-self.n_steps, :].contiguous().view(-1, self.action_space).data.cpu().max(1)
-                    beta_index = beta_index.numpy()
-                    act_diff = (a_index_np != beta_index).astype(np.int)
+                Hpi = -(pi * pi_log).sum(dim=1)
+                Hbeta = -(beta_soft * beta_log.view(-1, self.action_space)).sum(dim=1)
 
-                    R = R.view(-1).data.cpu().numpy()
+                adv_a = rho_v.view(-1).data.cpu().numpy()
+                # r = r.view(-1).data.cpu().numpy()
+                r = torch.cat((r, q_a[:, -self.n_steps:]), dim=1).view(-1).data.cpu().numpy()
+                q_a = q_a.view(-1).data.cpu().numpy()
 
-                    # add results
 
-                    results['act_diff'].append(act_diff)
-                    results['a_agent'].append(beta_index)
-                    results['adv_a'].append(r)
-                    results['q_a'].append(q_a)
-                    results['a_player'].append(a_index_np)
-                    results['Hbeta'].append(0)
-                    results['Hpi'].append(0)
-                    results['mc_val'].append(R)
+                _, beta_index = beta_soft.data.cpu().max(1)
+                beta_index = beta_index.numpy()
+                act_diff = (a_index_np != beta_index).astype(np.int)
 
-                    # add results
-                    results['loss_beta'].append(((R - r) ** 2).mean())
-                    results['loss_value'].append(loss_value.data.cpu().numpy())
-                    results['loss_std'].append(0)
-                    results['n'].append(n)
-
-                if not (n + 1 + self.n_offset) % self.update_target_interval:
+                if not (n+1) % self.update_target_interval:
                     # save agent state
                     target_net.load_state_dict(self.value_net.state_dict())
+
+                # add results
+
+                results['act_diff'].append(act_diff)
+                results['a_agent'].append(beta_index)
+                results['adv_a'].append(adv_a)
+                results['q_a'].append(q_a)
+                results['a_player'].append(a_index_np)
+                results['Hbeta'].append(Hbeta.data.mean().cpu().numpy())
+                results['Hpi'].append(Hpi.data.mean().cpu().numpy())
+                results['mc_val'].append(r)
+
+                # add results
+                results['loss_beta'].append(loss_beta.data.cpu().numpy())
+                results['loss_value'].append(loss_value.data.cpu().numpy())
+                results['loss_std'].append(0)
+                results['n'].append(n)
 
                 if not (n + 1 + self.n_offset) % self.update_memory_interval:
                     # save agent state
@@ -223,16 +264,14 @@ class R2D2Agent(Agent):
                     results['q_a'] = np.concatenate(results['q_a'])
                     results['a_player'] = np.concatenate(results['a_player'])
                     results['mc_val'] = np.concatenate(results['mc_val'])
-                    results['image'] = s[0, 0, :-1, :, :].data.cpu()
 
                     yield results
+                    self.beta_net.train()
                     self.value_net.train()
                     results = {key: [] for key in results}
 
                     if (n + self.n_offset) >= n_tot:
                         break
-
-            del loss_value
 
     def clean(self):
 
@@ -254,6 +293,7 @@ class R2D2Agent(Agent):
                 traj_num = int(traj.split(".")[0])
                 if traj_num < traj_min:
                     traj_data = np.load(os.path.join(trajectory_dir, traj))
+                    # traj_data = pd.read_pickle(os.path.join(trajectory_dir, traj))
                     for d in traj_data['ep']:
                         episode_list.add(d)
                     os.remove(os.path.join(trajectory_dir, traj))
@@ -262,8 +302,6 @@ class R2D2Agent(Agent):
                 shutil.rmtree(os.path.join(screen_dir, str(ep)))
 
     def play(self, n_tot, save=True, load=True, fix=False):
-
-        pi_rand_t = torch.ones(1, 1, self.action_space, dtype=torch.float).to(self.device) / self.action_space
 
         for i in range(n_tot):
 
@@ -282,10 +320,12 @@ class R2D2Agent(Agent):
                 except:
                     time.sleep(0.5)
 
+            self.beta_net.eval()
             self.value_net.eval()
 
             # Initial states
-            h_q = torch.zeros(1, self.hidden_state).to(self.device)
+            h_q = torch.zeros(1, 1, self.hidden_state).to(self.device)
+            h_beta = torch.zeros(1, 1, self.hidden_state).to(self.device)
 
             while not self.env.t:
 
@@ -295,23 +335,55 @@ class R2D2Agent(Agent):
                     except:
                         pass
 
+                    self.beta_net.eval()
                     self.value_net.eval()
 
                 s = self.env.s.to(self.device).unsqueeze(0)
                 trigger = trigger or (self.env.score > self.behavioral_avg_score * self.explore_threshold)
 
+                beta, h_beta = self.beta_net(s, h_beta)
+                beta = F.softmax(beta.detach(), dim=2)
+
                 # take q as adv
 
-                q, _, h_q = self.value_net(s, self.a_zeros, pi_rand_t, h_q)
+                v, adv, _, q, _, h_q = self.value_net(s, self.a_zeros, beta, h_q)
 
                 q = q.squeeze(0).squeeze(0).data.cpu().numpy()
+                v_expected = v.squeeze(0).squeeze(0).data.cpu().numpy()
+
+                beta = beta.squeeze(0).squeeze(0).data.cpu().numpy()
+                adv = adv.squeeze(0).squeeze(0).data.cpu().numpy()
 
                 if self.n_offset >= self.random_initialization:
 
-                    pi = np.zeros(self.action_space)
-                    pi[np.argmax(q)] = 1
-                    pi_mix = self.eps_pre * self.pi_rand + (1 - self.eps_pre) * pi
+                    if self.player == "reroutetv":
 
+                        pi = beta.copy()
+                        adv2 = adv.copy()
+
+                        rank = np.argsort(adv)
+                        pi = self.cmin * pi
+
+                        Delta = 1 - self.cmin
+                        while Delta > 0:
+                            a = np.argmax(adv2)
+                            Delta_a = np.min((Delta, (self.cmax - self.cmin) * beta[a]))
+                            Delta -= Delta_a
+                            pi[a] += Delta_a
+                            adv2[a] = -1e11
+
+                        adv_rank = np.argsort(rank).astype(np.float)
+                        pi_adv = 1. * np.logical_or(adv >= 0, adv_rank == (self.action_space - 1))
+                        pi_adv = pi_adv / (np.sum(pi_adv))
+
+                        pi = (1 - self.mix) * pi + self.mix * pi_adv
+                        pi_mix = self.eps_pre * self.pi_rand + (1 - self.eps_pre) * pi
+
+                    elif self.player == "behavioral":
+                        pi_mix = beta.copy()
+
+                    else:
+                        raise NotImplementedError
 
                 else:
                     pi_mix = self.pi_rand
@@ -329,13 +401,12 @@ class R2D2Agent(Agent):
                     lives = self.env.lives
 
                     rewards[-1].append(self.env.r)
-                    v_target[-1].append(0)
+                    v_target[-1].append(v_expected)
                     q_val.append(q[a])
 
                 self.frame += 1
 
-
-            mc_val = get_mc_value(rewards, None, self.discount, None)
+            mc_val = _get_mc_value(rewards, None, self.discount, None)
             q_val = np.array(q_val)
 
             print("sts | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | nst: %s\t| n %d\t| avg_r: %g\t| avg_f: %g" %
@@ -353,10 +424,11 @@ class R2D2Agent(Agent):
     def multiplay(self):
 
         n_players = self.n_players
-        pi_rand_t = torch.ones(n_players, 1, self.action_space, dtype=torch.float).to(self.device) / self.action_space
 
         player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
-        explore_threshold = np.zeros(self.n_players)
+
+        explore_threshold = player_i
+
         mp_explore = 0.4 ** (1 + 7 * (1 - player_i))
 
         mp_env = [Env() for _ in range(n_players)]
@@ -365,9 +437,10 @@ class R2D2Agent(Agent):
         a_zeros_mp = self.a_zeros.repeat(n_players, 1, 1)
         mp_pi_rand = np.repeat(np.expand_dims(self.pi_rand, axis=0), n_players, axis=0)
 
+        range_players = np.arange(n_players)
         rewards = [[[]] for _ in range(n_players)]
         v_target = [[[]] for _ in range(n_players)]
-        q_expected = [[] for _ in range(n_players)]
+        rho = [[[]] for _ in range(n_players)]
         episode = [[] for _ in range(n_players)]
         image_dir = ['' for _ in range(n_players)]
         trajectory = [[] for _ in range(n_players)]
@@ -375,6 +448,7 @@ class R2D2Agent(Agent):
         fr_s = [self.frame + self.history_length - 1 for _ in range(n_players)]
 
         trajectory_dir = [os.path.join(self.explore_dir, "trajectory")] * n_players
+
         readlock = [os.path.join(self.list_dir, "readlock_explore.npy")] * n_players
 
         # set initial episodes number
@@ -388,7 +462,8 @@ class R2D2Agent(Agent):
         release_file(fwrite)
 
         # Initial states
-        h_q = torch.zeros(n_players, self.hidden_state).to(self.device)
+        h_q = torch.zeros(1, n_players, self.hidden_state).to(self.device)
+        h_beta = torch.zeros(1, n_players, self.hidden_state).to(self.device)
 
         for i in range(n_players):
             mp_env[i].reset()
@@ -405,25 +480,65 @@ class R2D2Agent(Agent):
                 except:
                     pass
 
+                self.beta_net.eval()
                 self.value_net.eval()
 
             # save previous hidden state to np object
-            h_q_np = h_q.data.cpu().numpy()
+            h_beta_np = h_beta.squeeze(0).data.cpu().numpy()
+            h_q_np = h_q.squeeze(0).data.cpu().numpy()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device).unsqueeze(1)
 
+            beta, h_beta = self.beta_net(s, h_beta)
+            beta = F.softmax(beta.detach(), dim=2)
             # take q as adv
-            q, _, h_q = self.value_net(s, a_zeros_mp, pi_rand_t, h_q)
+
+            v_expected, adv, _, q, _, h_q = self.value_net(s, a_zeros_mp, beta, h_q)
 
             q = q.squeeze(1).data.cpu().numpy()
-            exploration = np.repeat(np.expand_dims(mp_explore, axis=1), self.action_space, axis=1)
+            beta = beta.squeeze(1).data.cpu().numpy()
+
+            adv = adv.squeeze(1).data.cpu().numpy()
+            v_expected = v_expected.squeeze(1).squeeze(1).data.cpu().numpy()
+
+            rank = np.argsort(adv, axis=1)
+            adv_rank = np.argsort(rank, axis=1).astype(np.float)
+
+            mp_trigger = np.logical_and(
+                np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
+                explore_threshold >= 0)
+
+            exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
 
             if self.n_offset >= self.random_initialization:
 
-                pi = np.zeros((n_players, self.action_space))
-                pi[range(n_players), np.argmax(q, axis=1)] = 1
+                pi = self.cmin * beta
 
-                pi_mix = pi * (1 - exploration) + exploration * mp_pi_rand
+                Delta = np.ones(n_players) - self.cmin
+                for i in range(self.action_space):
+                    a = rank[:, self.action_space - 1 - i]
+                    Delta_a = np.minimum(Delta, (self.cmax - self.cmin) * beta[range_players, a])
+                    Delta -= Delta_a
+                    pi[range_players, a] += Delta_a
+
+                pi_adv = 1. * np.logical_or(adv >= 0, adv_rank == (self.action_space - 1))
+                pi_adv = pi_adv / np.repeat(np.sum(pi_adv, axis=1, keepdims=True), self.action_space, axis=1)
+                pi = (1 - self.mix) * pi + self.mix * pi_adv
+
+                # const explore
+                pi = (1 - self.eps_pre) * pi + self.eps_pre / self.action_space
+
+                # soft explore
+                qmin = np.repeat(np.min(q, axis=1, keepdims=True), self.action_space, axis=1)
+                qmax = np.repeat(np.max(q, axis=1, keepdims=True), self.action_space, axis=1)
+
+                soft_rand = self.temp_soft ** ((q - qmin) / (qmax - qmin))
+
+                soft_reg = pi / (
+                            np.repeat(np.sum(soft_rand, axis=1, keepdims=True), self.action_space, axis=1) - soft_rand)
+                soft_reg = np.repeat(np.sum(soft_reg, axis=1, keepdims=True), self.action_space, axis=1) - soft_reg
+
+                pi_mix = pi * (1 - exploration) + exploration * (soft_rand * soft_reg)
 
                 pi_mix = pi_mix.clip(0, 1)
                 pi_mix = pi_mix / np.repeat(pi_mix.sum(axis=1, keepdims=True), self.action_space, axis=1)
@@ -441,57 +556,59 @@ class R2D2Agent(Agent):
                 env = mp_env[i]
                 cv2.imwrite(os.path.join(image_dir[i], "%s.png" % str(self.frame)), mp_env[i].image, [imcompress, compress_level])
 
-                h_beta_save = np.zeros_like(h_q_np[i]) if not self.frame % self.seq_overlap else None
+                h_beta_save = h_beta_np[i] if not self.frame % self.seq_overlap else None
                 h_q_save = h_q_np[i] if not self.frame % self.seq_overlap else None
 
                 episode[i].append(np.array((self.frame, a, pi[i],
                                             h_beta_save, h_q_save,
                                             episode_num[i], 0., fr_s[i], 0,
-                                            0., 1., 1., 0, 1., 0), dtype=self.rec_type))
+                                            0., 1., 1., 0), dtype=self.rec_type))
+
                 env.step(a)
 
                 if lives[i] > env.lives:
                     rewards[i].append([])
                     v_target[i].append([])
+                    rho[i].append([])
                 lives[i] = env.lives
 
                 rewards[i][-1].append(env.r)
-                v_target[i][-1].append(q[i].max())
-                q_expected[i].append(q[i][a])
+                v_target[i][-1].append(v_expected[i])
+                rho[i][-1].append(pi[i][a] / pi_mix[i][a])
 
                 if env.t:
 
                     # cancel termination reward
                     rewards[i][-1][-1] -= self.termination_reward * int(env.k * self.skip >= self.max_length or env.score >= self.max_score)
                     td_val = get_expected_value(rewards[i], v_target[i], self.discount, self.n_steps)
+                    rho_val = get_rho_is(rho[i], self.n_steps)
+
+                    rho_vec = np.concatenate(rho[i])
 
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
-
-                    # tde = get_tde(rewards[i], v_target[i], self.discount, self.n_steps, q_expected[i])
-                    # episode_df['tde'] = tde[self.history_length - 1:self.max_length]
-
-                    mc_val = get_mc_value(rewards[i], v_target[i], self.discount, self.n_steps)
+                    # episode_df = pd.DataFrame(episode[i][self.history_length - 1:self.max_length])
 
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
-
-                    # hack to save the true target (MC value)
-                    episode_df['rho_q'] = mc_val[self.history_length - 1:self.max_length]
-
+                    episode_df['rho_v'] = np.clip(rho_vec, 0, 1)[self.history_length - 1:self.max_length]
+                    episode_df['rho_q'] = np.clip(rho_val, 0, 1)[self.history_length - 1:self.max_length]
                     episode_df['fr_e'] = episode_df[-1]['fr'] + 1
+
                     trajectory[i].append(episode_df)
 
                     # reset hidden states
-                    h_q[i, :].zero_()
+                    h_q[:, i, :].zero_()
+                    h_beta[:, i, :].zero_()
 
                     print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
-                          (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), 1, time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
+                          (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), mp_trigger[i], time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
 
                     env.reset()
                     episode[i] = []
-                    q_expected[i] = []
                     rewards[i] = [[]]
+                    rho[i] = [[]]
                     v_target[i] = [[]]
                     lives[i] = env.lives
+                    mp_trigger[i] = 0
                     fr_s[i] = (self.frame + 1) + (self.history_length - 1)
 
                     # get new episode number
@@ -521,10 +638,13 @@ class R2D2Agent(Agent):
                             release_file(fwrite)
 
                             traj_to_save = np.concatenate(trajectory[i])
+                            # traj_to_save = pd.concat(trajectory[i])
                             traj_to_save['traj'] = traj_num
 
                             traj_file = os.path.join(trajectory_dir[i], "%d.npy" % traj_num)
                             np.save(traj_file, traj_to_save)
+                            # traj_file = os.path.join(trajectory_dir[i], "%d.pkl" % traj_num)
+                            # traj_to_save.to_pickle(traj_file)
 
                             fread = lock_file(readlock[i])
                             traj_list = np.load(fread)
