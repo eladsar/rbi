@@ -87,6 +87,7 @@ parser.add_argument('--epsilon-a', type=float, default=0.001, metavar='ε', help
 parser.add_argument('--cmin', type=float, default=0.1, metavar='c_min', help='Lower reroute threshold')
 parser.add_argument('--cmax', type=float, default=2, metavar='c_max', help='Upper reroute threshold')
 parser.add_argument('--delta', type=float, default=0.1, metavar='delta', help='Total variation constraint')
+parser.add_argument('--ppo-eps', type=float, default=0.1, metavar='ε', help='PPO epsilon level')
 
 parser.add_argument('--player', type=str, default='reroutetv', help='Player type: [reroute/tv]')
 
@@ -220,11 +221,6 @@ class Consts(object):
                              ('ep', np.int), ('t', np.float32), ('fr_s', np.int), ('fr_e', np.int),
                              ('r', np.float32), ('rho_v', np.float32), ('rho_q', np.float32), ('traj', np.int),
                              ('tde', np.float32), ('aux', np.float32)])
-
-    obs_type = np.dtype([('s', np.float32, (4, 84, 84)), ('s_tag', np.float32, (4, 84, 84)), ('a', np.int),
-                         ('r', np.float32), ('t', np.float32),
-                         ('pi', np.float32, len(np.nonzero(actions[args.game])[0])),
-                         ('pi_tag', np.float32, len(np.nonzero(actions[args.game])[0])),])
 
     outdir = os.path.join(args.base_dir, 'results')
     logdir = os.path.join(args.base_dir, 'logs')

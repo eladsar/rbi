@@ -13,7 +13,7 @@ from config import consts, args
 import psutil
 import socket
 
-from model import BehavioralRNN, DuelRNN
+from model import DuelRNN
 
 from memory_rnn import ObservationsRNNMemory, ObservationsRNNBatchSampler
 from agent import Agent
@@ -60,11 +60,6 @@ class R2D2Agent(Agent):
             self.frame = 0
             self.states = 0
 
-            print("Explorer player")
-            self.trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-            self.screen_dir = os.path.join(self.explore_dir, "screen")
-            self.readlock = os.path.join(self.list_dir, "readlock_explore.npy")
-
         else:
 
             # datasets
@@ -72,22 +67,6 @@ class R2D2Agent(Agent):
             self.train_sampler = ObservationsRNNBatchSampler(root_dir)
             self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_sampler=self.train_sampler,
                                                             num_workers=args.cpu_workers, pin_memory=True, drop_last=False)
-
-            try:
-                os.mkdir(self.best_player_dir)
-                os.mkdir(self.exploit_dir)
-                os.mkdir(self.explore_dir)
-                os.mkdir(os.path.join(self.exploit_dir, "trajectory"))
-                os.mkdir(os.path.join(self.exploit_dir, "screen"))
-                os.mkdir(os.path.join(self.explore_dir, "trajectory"))
-                os.mkdir(os.path.join(self.explore_dir, "screen"))
-                os.mkdir(self.list_dir)
-                np.save(self.writelock, 0)
-                np.save(self.episodelock, 0)
-                np.save(os.path.join(self.list_dir, "readlock_explore.npy"), [])
-                np.save(os.path.join(self.list_dir, "readlock_exploit.npy"), [])
-            except FileExistsError:
-                pass
 
         # configure learning
 
@@ -234,33 +213,6 @@ class R2D2Agent(Agent):
 
             del loss_value
 
-    def clean(self):
-
-        while True:
-
-            time.sleep(2)
-
-            screen_dir = os.path.join(self.explore_dir, "screen")
-            trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-
-            try:
-                del_inf = np.load(os.path.join(self.list_dir, "old_explore.npy"))
-            except (IOError, ValueError):
-                continue
-            traj_min = del_inf[0] - 32
-            episode_list = set()
-
-            for traj in os.listdir(trajectory_dir):
-                traj_num = int(traj.split(".")[0])
-                if traj_num < traj_min:
-                    traj_data = np.load(os.path.join(trajectory_dir, traj))
-                    for d in traj_data['ep']:
-                        episode_list.add(d)
-                    os.remove(os.path.join(trajectory_dir, traj))
-
-            for ep in episode_list:
-                shutil.rmtree(os.path.join(screen_dir, str(ep)))
-
     def play(self, n_tot, save=True, load=True, fix=False):
 
         pi_rand_t = torch.ones(1, 1, self.action_space, dtype=torch.float).to(self.device) / self.action_space
@@ -310,7 +262,7 @@ class R2D2Agent(Agent):
 
                     pi = np.zeros(self.action_space)
                     pi[np.argmax(q)] = 1
-                    pi_mix = self.eps_pre * self.pi_rand + (1 - self.eps_pre) * pi
+                    pi_mix = self.epsilon * self.pi_rand + (1 - self.epsilon) * pi
 
 
                 else:

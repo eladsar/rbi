@@ -419,8 +419,6 @@ class RBIAgent(Agent):
                 self.value_net.eval()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
-            aux = torch.cat([env.aux for env in mp_env]).to(self.device)
-            aux_np = aux.cpu().numpy().astype(np.float32)
 
             beta = self.beta_net(s)
             beta = F.softmax(beta.detach(), dim=1)
@@ -476,7 +474,7 @@ class RBIAgent(Agent):
                 episode[i].append(np.array((self.frame, a, pi[i],
                                             None, None,
                                             episode_num[i], 0., 0, 0,
-                                            0., 1., 1., 0, 1., aux_np[i]), dtype=self.rec_type))
+                                            0., 1., 1., 0, 1., 0), dtype=self.rec_type))
 
                 env.step(a)
 

@@ -332,8 +332,6 @@ class ApeAgent(Agent):
                 self.value_net.eval()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
-            aux = torch.cat([env.aux for env in mp_env]).to(self.device)
-            aux_np = aux.cpu().numpy().astype(np.float32)
 
             _, _, _, q, _ = self.value_net(s, a_zeros_mp, pi_rand_batch)
 
@@ -368,7 +366,7 @@ class ApeAgent(Agent):
                 episode[i].append(np.array((self.frame, a, pi[i],
                                             None, None,
                                             episode_num[i], 0., 0, 0,
-                                            0., 1., 1., 0, 1., aux_np[i]), dtype=self.rec_type))
+                                            0., 1., 1., 0, 1., 0), dtype=self.rec_type))
 
                 env.step(a)
 
