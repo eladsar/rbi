@@ -28,7 +28,7 @@ RUN	mkdir -p /workspace/projects && \
     git clone https://github.com/eladsar/rbi.git 
 RUN cd /workspace/projects/rbi
 
-RUN conda env create --file /workspace/projects/rbi/environment.yml
+RUN conda env create --file /workspace/projects/rbi/docker/environment.yml
 RUN /opt/conda/envs/torch1/bin/pip install atari-py
 
 #RUN conda list
