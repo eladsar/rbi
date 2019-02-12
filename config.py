@@ -76,7 +76,7 @@ parser.add_argument('--play-episodes-interval', type=int, default=16, metavar='N
 
 parser.add_argument('--clip', type=float, default=1, metavar='VALUE', help='Reward clipping (0 to disable)')
 parser.add_argument('--discount', type=float, default=0.99, metavar='γ', help='Discount factor')
-parser.add_argument('--termination-reward', type=float, default=-1, help='Reward for terminal state')
+parser.add_argument('--termination-reward', type=float, default=0, help='Reward for terminal state')
 parser.add_argument('--friction-reward', type=float, default=0, help='Negative friction reward')
 
 parser.add_argument('--priority-alpha', type=float, default=0.5, metavar='α', help='Attenuation factor for the prioritized replay distribution')
@@ -94,7 +94,7 @@ parser.add_argument('--softmax-diff', type=float, default=3.8, metavar='β', hel
 parser.add_argument('--epsilon', type=float, default=0.00164, metavar='ε', help='exploration parameter before behavioral period')
 
 # dataloader
-parser.add_argument('--cpu-workers', type=int, default=24, help='How many CPUs will be used for the data loading')
+parser.add_argument('--cpu-workers', type=int, default=48, help='How many CPUs will be used for the data loading')
 parser.add_argument('--cuda-default', type=int, default=0, help='Default GPU')
 
 # train parameters
