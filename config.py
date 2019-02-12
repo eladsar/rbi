@@ -3,9 +3,10 @@ import time
 import numpy as np
 import socket
 import os
+import pwd
 
 parser = argparse.ArgumentParser(description='atari')
-username = os.getlogin()
+username = pwd.getpwuid(os.geteuid()).pw_name
 
 if "gpu" in socket.gethostname():
     base_dir = os.path.join('/home/dsi/', username, 'data/rbi')
@@ -41,7 +42,7 @@ boolean_feature("load-behavioral", False, 'Load behavioral model')
 boolean_feature("learn", False, 'Learn from the observations')
 boolean_feature("play", False, 'Test the learned model via playing')
 boolean_feature("multiplay", False, 'Send samples to memory from multiple parallel players')
-boolean_feature("choose", False, 'Choose best player')
+boolean_feature("evaluate", False, 'evaluate player')
 boolean_feature("clean", False, 'Clean old trajectories')
 boolean_feature("tensorboard", True, "Log results to tensorboard")
 boolean_feature("log-scores", True, "Log score results to NPY objects")
@@ -52,7 +53,6 @@ boolean_feature("dropout", False, "Use Dropout layer")
 boolean_feature("reward-shape", False, "Shape reward with sign(r)*log(1+|r|)")
 boolean_feature("infinite-horizon", False, "Don't end episode in EOL")
 boolean_feature("frame-limit", True, "Limit episode frames")
-parser.add_argument('--target', type=str, default='tde', help='Target method [td|tde|mc]')
 
 # parameters
 parser.add_argument('--resume', type=int, default=-1, help='Resume experiment number, set -1 for last experiment')
@@ -85,17 +85,13 @@ parser.add_argument('--priority-eta', type=float, default=0.9, metavar='η', hel
 parser.add_argument('--epsilon-a', type=float, default=0.001, metavar='ε', help='Priority replay epsilon-a')
 parser.add_argument('--cmin', type=float, default=0.1, metavar='c_min', help='Lower reroute threshold')
 parser.add_argument('--cmax', type=float, default=2, metavar='c_max', help='Upper reroute threshold')
-parser.add_argument('--delta', type=float, default=0.2, metavar='delta', help='Total variation constraint')
+parser.add_argument('--delta', type=float, default=0.1, metavar='delta', help='Total variation constraint')
 
 parser.add_argument('--player', type=str, default='reroutetv', help='Player type: [reroute/tv]')
 
 # exploration parameters
 parser.add_argument('--softmax-diff', type=float, default=3.8, metavar='β', help='Maximum softmax diff')
-parser.add_argument('--ppo-eps', type=float, default=0.1, metavar='ε', help='PPO epsilon level')
-parser.add_argument('--explore-threshold', type=float, default=0.0, metavar='t', help='Threshold score for exploration')
-parser.add_argument('--epsilon-pre', type=float, default=0.00164, metavar='ε', help='exploration parameter before behavioral period')
-parser.add_argument('--epsilon-post', type=float, default=0.00164, metavar='ε', help='exploration parameter after behavioral period')
-parser.add_argument('--temperature-soft', type=float, default=2, metavar='ε', help='temperature parameter for random exploration')
+parser.add_argument('--epsilon', type=float, default=0.00164, metavar='ε', help='exploration parameter before behavioral period')
 
 # dataloader
 parser.add_argument('--cpu-workers', type=int, default=24, help='How many CPUs will be used for the data loading')
@@ -224,16 +220,13 @@ class Consts(object):
                              ('r', np.float32), ('rho_v', np.float32), ('rho_q', np.float32), ('traj', np.int),
                              ('tde', np.float32), ('aux', np.float32)])
 
-    # observe_type = np.dtype([('s', np.float32, (args.history_length, args.height, args.width)),
-    #                          ('s_tag', np.float32, (args.history_length, args.height, args.width)),
-    #                          ('a', np.int), ('pi', np.float32, len(np.nonzero(actions[args.game])[0])),
-    #                          ('pi_tag', np.float32, len(np.nonzero(actions[args.game])[0])),
-    #                          ('h_beta', np.float32, args.hidden_features_rnn),
-    #                          ('h_q', np.float32, args.hidden_features_rnn),
-    #                          ('t', np.float32), ('r', np.float32)])
+    obs_type = np.dtype([('s', np.float32, (4, 84, 84)), ('s_tag', np.float32, (4, 84, 84)), ('a', np.int),
+                         ('r', np.float32), ('t', np.float32),
+                         ('pi', np.float32, len(np.nonzero(actions[args.game])[0])),
+                         ('pi_tag', np.float32, len(np.nonzero(actions[args.game])[0])),])
 
-    outdir = os.path.join(base_dir, 'results')
-    logdir = os.path.join(base_dir, 'logs')
+    outdir = os.path.join(args.base_dir, 'results')
+    logdir = os.path.join(args.base_dir, 'logs')
     indir = os.path.join('/dev/shm/', username, 'rbi')
 
 

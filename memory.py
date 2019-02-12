@@ -16,16 +16,33 @@ imread_grayscale = cv2.IMREAD_GRAYSCALE
 
 class Memory(torch.utils.data.Dataset):
 
-    def __init__(self):
+    def __init__(self, replay_dir):
         super(Memory, self).__init__()
         self.history_length = args.history_length
         self.n_steps = args.n_steps
+        self.screen_dir = os.path.join(replay_dir, "explore", "screen")
+        self.obs_type = consts.obs_type
 
     def __len__(self):
         return args.n_tot
 
-    def __getitem__(self, index):
-        raise NotImplementedError
+    def __getitem__(self, sample):
+
+        sample, next_sample = sample
+
+        episode_dir = os.path.join(self.screen_dir, str(sample['ep']))
+        s = self.preprocess_history(episode_dir, sample['fr'])
+
+        if not sample['t']:
+            s_tag = self.preprocess_history(episode_dir, next_sample['fr'])
+        else:
+            s_tag = np.zeros((4, 84, 84), dtype=np.float32)
+
+        return {'s': torch.from_numpy(s), 'r': torch.from_numpy(np.array(sample['r'])),
+                'a': torch.from_numpy(np.array(sample['a'])), 't': torch.from_numpy(np.array(sample['t'])),
+                'pi': torch.from_numpy(sample['pi']),
+                's_tag': torch.from_numpy(s_tag), 'pi_tag': torch.from_numpy(next_sample['pi']),
+                'tde': torch.from_numpy(np.array(sample['tde']))}
 
     def preprocess_history(self, episode_dir, frame):
 
@@ -33,24 +50,7 @@ class Memory(torch.utils.data.Dataset):
         return np.stack([(cv2.resize(cv2.imread(f0, imread_grayscale).astype(np.float32), (img_width, img_height), interpolation=interpolation) / 256.) for f0 in frame0], axis=0)
 
 
-class ObservationsMemory(Memory):
-
-    def __init__(self, replay_dir):
-
-        super(ObservationsMemory, self).__init__()
-        self.screen_dir = os.path.join(replay_dir, "explore", "screen")
-
-    def __getitem__(self, sample):
-
-        episode_dir = os.path.join(self.screen_dir, str(sample['ep']))
-        s = self.preprocess_history(episode_dir, sample['fr'])
-
-        return {'s': s, 'r': sample['r'], 'rho_v': sample['rho_v'],
-                'rho_q': sample['rho_q'], 'a': sample['a'], 'pi': sample['pi'],
-                'aux': sample['aux']}
-
-
-class ObservationsBatchSampler(object):
+class ReplayBatchSampler(object):
 
     def __init__(self, replay_dir):
 
@@ -65,6 +65,7 @@ class ObservationsBatchSampler(object):
         self.readlock = os.path.join(replay_dir, "list", "readlock_explore.npy")
 
         self.rec_type = consts.rec_type
+        self.n_steps = args.n_steps
 
     def __iter__(self):
 
@@ -96,39 +97,39 @@ class ObservationsBatchSampler(object):
 
             len_replay_buffer = len(replay_buffer)
 
-            minibatches = min(self.replay_updates_interval, int(len_replay_buffer / self.batch))
-            shuffle_indexes = np.random.choice(len_replay_buffer, (minibatches, self.batch), replace=False)
+            minibatches = min(self.replay_updates_interval, int(len_replay_buffer / self.batch) - self.n_steps)
+
+            tde = replay_buffer['tde'] / np.sum(replay_buffer['tde'])
+            tde = tde[:-self.n_steps]
+
+            shuffle_indexes = np.random.choice(len_replay_buffer - self.n_steps, (minibatches, self.batch),
+                                               replace=True, p=tde)
 
             print("Explorer:Replay Buffer size is: %d" % len_replay_buffer)
 
             for i in range(minibatches):
                 samples = shuffle_indexes[i]
-                yield replay_buffer[samples]
+                yield zip(replay_buffer[samples], replay_buffer[samples + self.n_steps])
 
     def __len__(self):
         return np.inf
 
 
-class DQNMemory(Memory):
+def collate(batch):
 
-    def __init__(self, replay_dir):
+    numel = sum([x['s'].numel() for x in batch])
+    storage = batch[0]['s'].storage()._new_shared(numel)
+    out_s = batch[0]['s'].new(storage)
 
-        super(DQNMemory, self).__init__()
-        self.screen_dir = os.path.join(replay_dir, "explore", "screen")
+    numel = sum([x['s_tag'].numel() for x in batch])
+    storage = batch[0]['s_tag'].storage()._new_shared(numel)
+    out_s_tag = batch[0]['s_tag'].new(storage)
 
-    def __getitem__(self, sample):
-
-        episode_dir = os.path.join(self.screen_dir, str(sample['ep']))
-        s = self.preprocess_history(episode_dir, sample['fr'])
-
-        if not sample['t']:
-            s_tag = self.preprocess_history(episode_dir, sample['fr']+self.n_steps)
-        else:
-            s_tag = np.zeros((4, 84, 84), dtype=np.float32)
-
-        return {'s': s, 'r': sample['r'], 'a': sample['a'], 't': sample['t'],
-                'aux': sample['aux'], 's_tag': s_tag, 'aux_tag': sample['aux']}
-
-
-DQNBatchSampler = ObservationsBatchSampler
-
+    return {'s': torch.stack([sample['s'] for sample in batch], out=out_s),
+            's_tag': torch.stack([sample['s_tag'] for sample in batch], out=out_s_tag),
+            'a': torch.stack([sample['a'] for sample in batch]),
+            'r': torch.stack([sample['r'] for sample in batch]),
+            't': torch.stack([sample['t'] for sample in batch]),
+            'pi': torch.stack([sample['pi'] for sample in batch]),
+            'pi_tag': torch.stack([sample['pi_tag'] for sample in batch]),
+            'tde': torch.stack([sample['tde'] for sample in batch])}

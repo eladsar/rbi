@@ -1,4 +1,3 @@
-import csv
 import time
 import os
 import sys
@@ -11,11 +10,7 @@ import time
 
 from config import consts, args
 from rbi_agent import RBIAgent
-# from ape_encoded_agent import ApeAgent
-from r2d2_agent import R2D2Agent
 from ape_agent import ApeAgent
-from ppo_agent import PPOAgent
-from rbi_rnn_agent import RBIRNNAgent
 
 from logger import logger
 from distutils.dir_util import copy_tree
@@ -86,14 +81,10 @@ class Experiment(object):
             # copy code to dir
             copy_tree(os.path.abspath("."), self.code_dir)
 
-            # write csv file of hyper-parameters
-            filename = os.path.join(self.root, "hyperparameters.csv")
-            with open(filename, 'w', newline='') as csvfile:
-                spamwriter = csv.writer(csvfile, delimiter=',',
-                                        quotechar='|', quoting=csv.QUOTE_MINIMAL)
-                spamwriter.writerow(self.exp_name)
-                for k, v in vars(args).items():
-                    spamwriter.writerow([k, str(v)])
+            # write args to file
+            filename = os.path.join(self.root, "args.txt")
+            with open(filename, 'w') as fp:
+                fp.write('\n'.join(sys.argv[1:]))
 
             with open(os.path.join(self.root, "logger"), "a") as fo:
                 fo.write("%s\n" % logger_file)
@@ -120,14 +111,8 @@ class Experiment(object):
 
         if args.algorithm == "rbi":
             return RBIAgent
-        elif args.algorithm == "rbi_rnn":
-            return RBIRNNAgent
         elif args.algorithm == "ape":
             return ApeAgent
-        elif args.algorithm == "ppo":
-            return PPOAgent
-        elif args.algorithm == "r2d2":
-            return R2D2Agent
         else:
             return NotImplementedError
 
@@ -287,7 +272,7 @@ class Experiment(object):
         agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint, choose=True)
         agent.clean()
 
-    def choose(self):
+    def evaluate(self):
 
         uuid = "%012d" % np.random.randint(1e12)
         agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint, choose=True)
@@ -418,6 +403,11 @@ class Experiment(object):
 
                 kk += 1
 
+            if agent.n_offset >= args.n_tot:
+                break
+
+        print("End of evaluation")
+
     def print_actions_statistics(self, a_agent, a_player, n, Hbeta, Hpi, adv_a, q_a, r_mc):
 
         # print action meanings
@@ -547,7 +537,4 @@ class Experiment(object):
         player = agent.demonstrate(128)
 
         for i, step in enumerate(player):
-            # print("here %d" % i)
             yield step
-
-            # print("out")
