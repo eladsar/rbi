@@ -65,6 +65,8 @@ copy ncurses.tar.gz and tmx-2.5.tar.gz to tmux_tmp directory
 copy install_tmux.sh to server and run
 ./install_tmux.sh
 
+setup directories, clone rbi and setup conda environment
+
 mkdir -p ~/data/rbi/results
 
 mkdir -p ~/data/rbi/logs
@@ -77,7 +79,7 @@ git clone https://github.com/eladsar/rbi.git
 
 cd ~/projects/rbi
 
-conda env create -f environment.yml
+conda env create -f install/environment.yml
 
 source activate torch1
 

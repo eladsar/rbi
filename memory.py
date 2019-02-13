@@ -21,7 +21,6 @@ class Memory(torch.utils.data.Dataset):
         self.history_length = args.history_length
         self.n_steps = args.n_steps
         self.screen_dir = os.path.join(replay_dir, "explore", "screen")
-        self.obs_type = consts.obs_type
 
     def __len__(self):
         return args.n_tot
