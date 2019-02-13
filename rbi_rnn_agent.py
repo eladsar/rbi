@@ -614,45 +614,6 @@ class RBIRNNAgent(Agent):
                 if self.n_offset >= self.n_tot:
                     break
 
-    def set_player(self, player, cmin=None, cmax=None, delta=None, eps_pre=None,
-                   eps_post=None, temp_soft=None, behavioral_avg_score=None,
-                   behavioral_avg_frame=None, explore_threshold=None):
-
-        self.player = player
-
-        if eps_pre is not None:
-            self.eps_pre = eps_pre * self.action_space / (self.action_space - 1)
-
-        if eps_post is not None:
-            self.eps_post = eps_post * self.action_space / (self.action_space - 1)
-
-        if temp_soft is not None:
-            self.temp_soft = temp_soft
-
-        if cmin is not None:
-            self.cmin = cmin
-
-        if cmax is not None:
-            self.cmax = cmax
-
-        if delta is not None:
-            self.delta = delta
-
-        if explore_threshold is not None:
-            self.explore_threshold = explore_threshold
-
-        if behavioral_avg_score is not None:
-            self.behavioral_avg_score = behavioral_avg_score
-
-        if behavioral_avg_frame is not None:
-            self.behavioral_avg_frame = behavioral_avg_frame
-
-        self.off = True if max(self.eps_post, self.eps_pre) > 0 else False
-
-        self.trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-        self.screen_dir = os.path.join(self.explore_dir, "screen")
-        self.readlock = os.path.join(self.list_dir, "readlock_explore.npy")
-
     def demonstrate(self, n_tot):
 
         self.beta_net.eval()

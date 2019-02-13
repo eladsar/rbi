@@ -165,11 +165,11 @@ class RBIAgent(Agent):
             is_value = tde ** (-self.priority_beta)
             is_value = is_value / is_value.max()
 
-            # is_policy = is_value
+            is_policy = is_value
 
-            v_diff = (q * (beta - pi)).mean().abs()
-            is_policy = ((v_diff + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_alpha
-            is_policy = is_policy / is_policy.max()
+            # v_diff = (q * (beta - pi)).mean().abs()
+            # is_policy = ((v_diff + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_alpha
+            # is_policy = is_policy / is_policy.max()
 
             loss_value = (self.q_loss(q_a, r) * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
@@ -451,15 +451,12 @@ class RBIAgent(Agent):
                 pi_greed[range(n_players), np.argmax(adv, axis=1)] = 1
                 pi = (1 - self.mix) * pi + self.mix * pi_greed
 
-                # const explore
-
-                pi_mix = pi * (1 - exploration) + exploration * mp_pi_rand
-                pi_mix = pi_mix.clip(0, 1)
-                pi_mix = pi_mix / np.repeat(pi_mix.sum(axis=1, keepdims=True), self.action_space, axis=1)
-
             else:
                 pi = mp_pi_rand
-                pi_mix = pi
+
+            pi_mix = pi * (1 - exploration) + exploration * mp_pi_rand
+            pi_mix = pi_mix.clip(0, 1)
+            pi_mix = pi_mix / np.repeat(pi_mix.sum(axis=1, keepdims=True), self.action_space, axis=1)
 
             pi = pi.astype(np.float32)
 

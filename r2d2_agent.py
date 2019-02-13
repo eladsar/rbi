@@ -15,10 +15,10 @@ import socket
 
 from model import DuelRNN
 
-from memory_rnn import ObservationsRNNMemory, ObservationsRNNBatchSampler
+from memory_rnn import ObservationsRNNMemory, ObservationsRNNBatchSampler, collate
 from agent import Agent
 from environment import Env
-from preprocess import release_file, lock_file, get_mc_value, get_td_value, h_torch, hinv_torch, get_expected_value
+from preprocess import release_file, lock_file, get_mc_value, get_td_value, h_torch, hinv_torch, get_expected_value, get_tde
 import cv2
 import os
 import time
@@ -48,6 +48,8 @@ class R2D2Agent(Agent):
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
         self.a_zeros_bi = torch.zeros(self.batch, self.burn_in, 1, dtype=torch.long).to(self.device)
 
+        self.q_loss = nn.SmoothL1Loss(reduction='none')
+
         if player:
 
             # play variables
@@ -65,7 +67,7 @@ class R2D2Agent(Agent):
             # datasets
             self.train_dataset = ObservationsRNNMemory(root_dir)
             self.train_sampler = ObservationsRNNBatchSampler(root_dir)
-            self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_sampler=self.train_sampler,
+            self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_sampler=self.train_sampler, collate_fn=collate,
                                                             num_workers=args.cpu_workers, pin_memory=True, drop_last=False)
 
         # configure learning
@@ -85,7 +87,6 @@ class R2D2Agent(Agent):
                      'optimizer_value': self.optimizer_value.state_dict(),
                      'aux': aux}
 
-
         torch.save(state, path)
 
     def load_checkpoint(self, path):
@@ -98,7 +99,6 @@ class R2D2Agent(Agent):
         else:
             self.value_net.load_state_dict(state['value_net'])
             self.optimizer_value.load_state_dict(state['optimizer_value'])
-
 
         self.n_offset = state['aux']['n']
         return state['aux']
@@ -141,11 +141,11 @@ class R2D2Agent(Agent):
 
             r = h_torch(r + self.discount ** self.n_steps * (1 - t[:, self.n_steps:]) * hinv_torch(q_target[:, self.n_steps:]))
 
-            is_value = (1 / (tde + self.epsilon_a)) ** self.priority_beta
-            is_value = is_value / is_value.mean()
+            is_value = tde ** (-self.priority_beta)
+            is_value = is_value / is_value.max()
             is_value = is_value.unsqueeze(1).repeat(1, self.seq_length - self.n_steps)
 
-            loss_value = ((q_a[:, :-self.n_steps] - r) ** 2 * is_value * (1 - t[:, :-self.n_steps])).mean()
+            loss_value = (self.q_loss(q_a[:, :-self.n_steps], r) * is_value * (1 - t[:, :-self.n_steps])).mean()
 
             # Learning part
 
@@ -286,7 +286,6 @@ class R2D2Agent(Agent):
 
                 self.frame += 1
 
-
             mc_val = get_mc_value(rewards, None, self.discount, None)
             q_val = np.array(q_val)
 
@@ -308,7 +307,8 @@ class R2D2Agent(Agent):
         pi_rand_t = torch.ones(n_players, 1, self.action_space, dtype=torch.float).to(self.device) / self.action_space
 
         player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
-        explore_threshold = np.zeros(self.n_players)
+        explore_threshold = player_i
+
         mp_explore = 0.4 ** (1 + 7 * (1 - player_i))
 
         mp_env = [Env() for _ in range(n_players)]
@@ -368,21 +368,24 @@ class R2D2Agent(Agent):
             q, _, h_q = self.value_net(s, a_zeros_mp, pi_rand_t, h_q)
 
             q = q.squeeze(1).data.cpu().numpy()
-            exploration = np.repeat(np.expand_dims(mp_explore, axis=1), self.action_space, axis=1)
+
+            mp_trigger = np.logical_and(
+                np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
+                explore_threshold >= 0)
+            exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
 
             if self.n_offset >= self.random_initialization:
 
                 pi = np.zeros((n_players, self.action_space))
                 pi[range(n_players), np.argmax(q, axis=1)] = 1
 
-                pi_mix = pi * (1 - exploration) + exploration * mp_pi_rand
-
-                pi_mix = pi_mix.clip(0, 1)
-                pi_mix = pi_mix / np.repeat(pi_mix.sum(axis=1, keepdims=True), self.action_space, axis=1)
-
             else:
                 pi = mp_pi_rand
-                pi_mix = pi
+
+            pi_mix = pi * (1 - exploration) + exploration * mp_pi_rand
+
+            pi_mix = pi_mix.clip(0, 1)
+            pi_mix = pi_mix / np.repeat(pi_mix.sum(axis=1, keepdims=True), self.action_space, axis=1)
 
             pi = pi.astype(np.float32)
 
@@ -419,8 +422,8 @@ class R2D2Agent(Agent):
 
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
 
-                    # tde = get_tde(rewards[i], v_target[i], self.discount, self.n_steps, q_expected[i])
-                    # episode_df['tde'] = tde[self.history_length - 1:self.max_length]
+                    tde = get_tde(rewards[i], v_target[i], self.discount, self.n_steps, q_expected[i])
+                    episode_df['tde'] = tde[self.history_length - 1:self.max_length]
 
                     mc_val = get_mc_value(rewards[i], v_target[i], self.discount, self.n_steps)
 
@@ -495,48 +498,8 @@ class R2D2Agent(Agent):
                 if self.n_offset >= self.n_tot:
                     break
 
-    def set_player(self, player, cmin=None, cmax=None, delta=None, eps_pre=None,
-                   eps_post=None, temp_soft=None, behavioral_avg_score=None,
-                   behavioral_avg_frame=None, explore_threshold=None):
-
-        self.player = player
-
-        if eps_pre is not None:
-            self.eps_pre = eps_pre * self.action_space / (self.action_space - 1)
-
-        if eps_post is not None:
-            self.eps_post = eps_post * self.action_space / (self.action_space - 1)
-
-        if temp_soft is not None:
-            self.temp_soft = temp_soft
-
-        if cmin is not None:
-            self.cmin = cmin
-
-        if cmax is not None:
-            self.cmax = cmax
-
-        if delta is not None:
-            self.delta = delta
-
-        if explore_threshold is not None:
-            self.explore_threshold = explore_threshold
-
-        if behavioral_avg_score is not None:
-            self.behavioral_avg_score = behavioral_avg_score
-
-        if behavioral_avg_frame is not None:
-            self.behavioral_avg_frame = behavioral_avg_frame
-
-        self.off = True if max(self.eps_post, self.eps_pre) > 0 else False
-
-        self.trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-        self.screen_dir = os.path.join(self.explore_dir, "screen")
-        self.readlock = os.path.join(self.list_dir, "readlock_explore.npy")
-
     def demonstrate(self, n_tot):
 
-        self.beta_net.eval()
         self.value_net.eval()
 
         for i in range(n_tot):

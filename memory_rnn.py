@@ -41,11 +41,6 @@ class MemoryRNN(torch.utils.data.Dataset):
     def __getitem__(self, index):
         raise NotImplementedError
 
-    def preprocess_history(self, episode_dir, frame):
-
-        frame0 = [os.path.join(episode_dir, "%d.png" % (frame - i)) for i in range(self.history_length)]
-        return np.stack([(cv2.resize(cv2.imread(f0, imread_grayscale).astype(np.float32), (img_width, img_height), interpolation=interpolation) / 256.) for f0 in frame0], axis=0)
-
     def preprocess_trajectory(self, episode_dir, frame, k):
 
         frames = [os.path.join(episode_dir, "%d.png" % (frame + i)) for i in range(-self.history_length + 1, k)]
@@ -54,14 +49,35 @@ class MemoryRNN(torch.utils.data.Dataset):
         return imgs[self.history_mat[:k], :, :]
 
 
-# def collate_observations(batch):
-#
-#
-#
-#     return {'s': s[self.burn_in:], 'r': r[-self.seq_length:-self.n_steps], 'rho_q': rho_q[-self.seq_length:-self.n_steps],
-#                 'rho_v': rho_v[self.burn_in:], 'a': a[self.burn_in:], 'pi': pi[self.burn_in:],
-#                 'h_q': h_q, 'h_beta': h_beta, 's_bi': s[:self.burn_in], 't': t[self.burn_in:],
-#                 'tde': tde}
+def collate(batch):
+
+    numel = sum([x['h_q'].numel() for x in batch])
+    storage = batch[0]['h_q'].storage()._new_shared(numel)
+    out_h_q = batch[0]['h_q'].new(storage)
+
+    numel = sum([x['h_beta'].numel() for x in batch])
+    storage = batch[0]['h_beta'].storage()._new_shared(numel)
+    out_h_beta = batch[0]['h_beta'].new(storage)
+
+    numel = sum([x['s'].numel() for x in batch])
+    storage = batch[0]['s'].storage()._new_shared(numel)
+    out_s = batch[0]['s'].new(storage)
+
+    numel = sum([x['s_bi'].numel() for x in batch])
+    storage = batch[0]['s_bi'].storage()._new_shared(numel)
+    out_s_bi = batch[0]['s_bi'].new(storage)
+
+    return {'s': torch.stack([sample['s'] for sample in batch], out=out_s),
+            's_bi': torch.stack([sample['s_bi'] for sample in batch], out=out_s_bi),
+            'a': torch.stack([sample['a'] for sample in batch]),
+            'r': torch.stack([sample['r'] for sample in batch]),
+            't': torch.stack([sample['t'] for sample in batch]),
+            'rho_q': torch.stack([sample['rho_q'] for sample in batch]),
+            'rho_v': torch.stack([sample['rho_v'] for sample in batch]),
+            'h_beta': torch.stack([sample['h_beta'] for sample in batch], out=out_h_beta),
+            'h_q': torch.stack([sample['h_q'] for sample in batch], out=out_h_q),
+            'pi': torch.stack([sample['pi'] for sample in batch]),
+            'tde': torch.FloatTensor([sample['tde'] for sample in batch])}
 
 
 class ObservationsRNNMemory(MemoryRNN):
@@ -107,9 +123,16 @@ class ObservationsRNNMemory(MemoryRNN):
         s = np.pad(s, [(0, pad_r + pad_l), (0, 0), (0, 0), (0, 0)], 'constant', constant_values=0)
         t = np.pad(samples['t'], [(0, pad_r + pad_l)], 'constant', constant_values=1)
 
-        return {'s': s[self.burn_in:], 'r': r[-self.seq_length:-self.n_steps], 'rho_q': rho_q[-self.seq_length:-self.n_steps],
-                'rho_v': rho_v[self.burn_in:], 'a': a[self.burn_in:], 'pi': pi[self.burn_in:],
-                'h_q': h_q, 'h_beta': h_beta, 's_bi': s[:self.burn_in], 't': t[self.burn_in:],
+        return {'s': torch.from_numpy(s[self.burn_in:]),
+                'r': torch.from_numpy(r[-self.seq_length:-self.n_steps]),
+                'rho_q': torch.from_numpy(rho_q[-self.seq_length:-self.n_steps]),
+                'rho_v': torch.from_numpy(rho_v[self.burn_in:]),
+                'a': torch.from_numpy(a[self.burn_in:]),
+                'pi': torch.from_numpy(pi[self.burn_in:]),
+                'h_q': torch.from_numpy(h_q),
+                'h_beta': torch.from_numpy(h_beta),
+                's_bi': torch.from_numpy(s[:self.burn_in]),
+                't': torch.from_numpy(t[self.burn_in:]),
                 'tde': tde}
 
 
@@ -167,9 +190,10 @@ class ObservationsRNNBatchSampler(object):
 
             replay_buffer = replay_buffer[-self.replay_memory_size - offset:]
 
-            tde = replay_buffer['tde'][total_seq_length:]
-            tde = (tde + self.epsilon_a) ** self.priority_alpha
-            self.tde = tde / tde.sum()
+            tde = replay['tde']
+            self.tde = np.concatenate([self.tde, tde])[-self.replay_memory_size - offset:]
+            prob = self.tde[:-total_seq_length]
+            prob = prob / prob.sum()
 
             # save previous traj_old to file
             np.save(self.list_old_path, np.array([traj_old]))
@@ -180,8 +204,7 @@ class ObservationsRNNBatchSampler(object):
             len_replay_buffer = len(replay_buffer) - total_seq_length
             minibatches = min(self.replay_updates_interval, int(len_replay_buffer / self.batch))
 
-            shuffle_indexes = np.random.choice(len_replay_buffer, (minibatches, self.batch), replace=False,
-                                               p=self.tde)
+            shuffle_indexes = np.random.choice(len_replay_buffer, (minibatches, self.batch), replace=False, p=prob)
 
             print("Explorer:Replay Buffer size is: %d" % len_replay_buffer)
 

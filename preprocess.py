@@ -15,6 +15,7 @@ from config import args, consts
 img_width = args.width
 img_height = args.height
 priority_eta = args.priority_eta
+priority_alpha = args.priority_alpha
 seq_length = args.seq_length
 
 # consts:
@@ -289,7 +290,7 @@ def get_tde(rewards, v_target, discount, n_steps, q_expected):
 
     # tde calculations
     td_target = get_td_value(rewards, v_target, discount, n_steps)
-    tde = (np.abs(np.array(q_expected) - td_target) + 0.1) / (np.abs(td_target) + 0.1)
+    tde = (np.abs(np.array(q_expected) - td_target) + 0.01) / (np.abs(td_target) + 0.01)
 
     n = seq_length - n_steps
     global_avg = tde.mean()
@@ -298,7 +299,7 @@ def get_tde(rewards, v_target, discount, n_steps, q_expected):
     max_tde = pd.Series(tde).rolling(n).max().dropna().values
     # up to here
 
-    return priority_eta * max_tde + (1 - priority_eta) * avg_td
+    return (priority_eta * max_tde + (1 - priority_eta) * avg_td) ** priority_alpha
 
 
 def get_gtd_value(rewards, v_target, discount, mu, sigma):
@@ -351,6 +352,7 @@ elif args.target == 'tde':
     get_expected_value = get_truncated_value
 else:
     raise NotImplementedError
+
 
 def state_to_img(s):
 

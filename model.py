@@ -143,7 +143,6 @@ class DuelRNN(nn.Module):
             nn.ReLU(),
         )
 
-        # self.rnn = nn.GRU(3136, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
         # self.rnn = nn.LSTM(self.hidden_rnn, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
         self.rnn = nn.LSTM(3136, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
 
@@ -197,13 +196,13 @@ class BehavioralRNN(nn.Module):
             nn.ReLU(),
         )
 
-        # self.rnn = nn.LSTM(3136, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
+        self.rnn = nn.LSTM(3136, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
         # self.rnn = nn.GRU(3136, self.hidden_rnn, 1, batch_first=True, dropout=0, bidirectional=False)
 
         # behavior net
         self.fc_beta = nn.Sequential(
-            nn.Linear(3136, args.hidden_features),
-            # nn.Linear(self.hidden_rnn, args.hidden_features),
+            # nn.Linear(3136, args.hidden_features),
+            nn.Linear(self.hidden_rnn, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, action_space),
         )

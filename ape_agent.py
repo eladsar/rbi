@@ -282,7 +282,6 @@ class ApeAgent(Agent):
 
         player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
         mp_explore = 0.4 ** (1 + 7 * player_i)
-        exploration = np.repeat(np.expand_dims(mp_explore, axis=1), self.action_space, axis=1)
         explore_threshold = player_i
 
         mp_env = [Env() for _ in range(n_players)]
@@ -337,6 +336,11 @@ class ApeAgent(Agent):
 
             q = q.data.cpu().numpy()
 
+            mp_trigger = np.logical_and(
+                np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
+                explore_threshold >= 0)
+            exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
+
             if self.n_offset >= self.random_initialization:
 
                 pi = np.zeros((self.n_players, self.action_space))
@@ -350,11 +354,6 @@ class ApeAgent(Agent):
             pi_mix = pi_mix / np.repeat(np.expand_dims(pi_mix.sum(axis=1), axis=1), self.action_space, axis=1)
 
             v_expected = (q * pi).sum(axis=1)
-
-            mp_trigger = np.logical_and(
-                np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
-                explore_threshold >= 0)
-            exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
 
             for i in range(n_players):
 
