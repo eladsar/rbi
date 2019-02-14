@@ -243,14 +243,12 @@ class Experiment(object):
         agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint)
         multiplayer = agent.multiplay()
 
-        while True:
+        for _ in multiplayer:
 
             player = self.get_player(agent)
             if player:
-
-                agent.set_player(player['player'], behavioral_avg_score=player['high'], behavioral_avg_frame=player['frames'])
-
-            next(multiplayer)
+                agent.set_player(player['player'], behavioral_avg_score=player['high'],
+                                 behavioral_avg_frame=player['frames'])
 
     def play(self, params=None):
 

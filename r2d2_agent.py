@@ -120,16 +120,15 @@ class R2D2Agent(Agent):
 
         for n, sample in tqdm(enumerate(self.train_loader)):
 
-            s = sample['s'].to(self.device)
-            a = sample['a'].to(self.device).unsqueeze_(2)
-            s_bi = sample['s_bi'].to(self.device)
-            r = sample['r'].to(self.device)
-            t = sample['t'].to(self.device)
-            R = sample['rho_q'].to(self.device)
-            tde = sample['tde'].to(self.device)
-
+            s = sample['s'].to(self.device, non_blocking=True)
+            a = sample['a'].to(self.device, non_blocking=True).unsqueeze_(2)
             # burn in
-            h_q = sample['h_q'].to(self.device)
+            h_q = sample['h_q'].to(self.device, non_blocking=True)
+            s_bi = sample['s_bi'].to(self.device, non_blocking=True)
+            r = sample['r'].to(self.device, non_blocking=True)
+            t = sample['t'].to(self.device, non_blocking=True)
+            R = sample['rho_q'].to(self.device, non_blocking=True)
+            tde = sample['tde'].to(self.device, non_blocking=True)
 
             _, _, h_q = self.value_net(s_bi, self.a_zeros_bi, self.pi_rand_bi, h_q)
 
@@ -225,7 +224,6 @@ class R2D2Agent(Agent):
             v_target = [[]]
             q_val = []
             lives = self.env.lives
-            trigger = False
 
             while not fix:
                 try:
@@ -250,8 +248,6 @@ class R2D2Agent(Agent):
                     self.value_net.eval()
 
                 s = self.env.s.to(self.device).unsqueeze(0)
-                trigger = trigger or (self.env.score > self.behavioral_avg_score * self.explore_threshold)
-
                 # take q as adv
 
                 q, _, h_q = self.value_net(s, self.a_zeros, pi_rand_t, h_q)
@@ -263,8 +259,6 @@ class R2D2Agent(Agent):
                     pi = np.zeros(self.action_space)
                     pi[np.argmax(q)] = 1
                     pi_mix = self.epsilon * self.pi_rand + (1 - self.epsilon) * pi
-
-
                 else:
                     pi_mix = self.pi_rand
 
