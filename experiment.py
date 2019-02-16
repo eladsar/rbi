@@ -34,17 +34,18 @@ class Experiment(object):
         self.action_meanings = [consts.action_meanings[i] for i in np.nonzero(consts.actions[args.game])[0]]
         self.log_scores = args.log_scores
 
+        temp_name = "%s_%s_%s_exp" % (args.game, args.algorithm, args.identifier)
         self.exp_name = ""
         if self.load_model:
             if self.resume >= 0:
                 for d in dirs:
-                    if "%s_%s_%s_exp_%04d_" % (args.game, args.algorithm, args.identifier, self.resume) in d:
+                    if "%s_%04d_" % (temp_name, self.resume) in d:
                         self.exp_name = d
                         self.exp_num = self.resume
                         break
             elif self.resume == -1:
 
-                ds = [d for d in dirs if "%s_exp" % args.identifier in d]
+                ds = [d for d in dirs if temp_name in d]
                 ns = np.array([int(d.split("_")[-3]) for d in ds])
                 self.exp_name = ds[np.argmax(ns)]
             else:
@@ -52,8 +53,8 @@ class Experiment(object):
 
         if not self.exp_name:
             # count similar experiments
-            n = max([-1] + [int(d.split("_")[-3]) for d in dirs if "%s_exp" % args.identifier in d]) + 1
-            self.exp_name = "%s_%s_%s_exp_%04d_%s" % (args.game, args.algorithm, args.identifier, n, consts.exptime)
+            n = max([-1] + [int(d.split("_")[-3]) for d in dirs if temp_name in d]) + 1
+            self.exp_name = "%s_%04d_%s" % (temp_name, n, consts.exptime)
             self.load_model = False
             self.exp_num = n
 

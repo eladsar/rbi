@@ -27,24 +27,27 @@ args="--n-steps=3 --no-reward-shape --no-dropout --no-infinite-horizon \
 
 CUDA_VISIBLE_DEVICES=0, python $loc/main.py --learn --identifier=$identifier --game=$game $resume $args $aux --algorithm=rbi
 
-CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
-                        --identifier=$identifier --game=$game $aux \
-                        --algorithm=rbi --play-episodes-interval=20 --max-frame=108000
-CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
-                        --identifier=$identifier --game=$game $aux \
-                        --algorithm=rbi --play-episodes-interval=20 --max-frame=108000
-CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
-                        --identifier=$identifier --game=$game $aux \
-                        --algorithm=rbi --play-episodes-interval=20 --max-frame=108000
-CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
-                        --identifier=$identifier --game=$game $aux \
-                        --algorithm=rbi --play-episodes-interval=20 --max-frame=108000
-CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
-                        --identifier=$identifier --game=$game $aux \
-                        --algorithm=rbi --play-episodes-interval=20 --max-frame=108000
-CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
-                        --identifier=$identifier --game=$game $aux \
-                        --algorithm=rbi --play-episodes-interval=20 --max-frame=108000
 
-CUDA_VISIBLE_DEVICES=0, python $loc/main.py --postprocess $resume2 $args \
-                        --identifier=$identifier --game=$game $aux --algorithm=rbi
+if [ $? -ne 0 ]; then
+    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
+                            --identifier=$identifier --game=$game $aux \
+                            --algorithm=rbi --play-episodes-interval=20 --max-frame=108000 &
+    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
+                            --identifier=$identifier --game=$game $aux \
+                            --algorithm=rbi --play-episodes-interval=20 --max-frame=108000 &
+    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
+                            --identifier=$identifier --game=$game $aux \
+                            --algorithm=rbi --play-episodes-interval=20 --max-frame=108000 &
+    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
+                            --identifier=$identifier --game=$game $aux \
+                            --algorithm=rbi --play-episodes-interval=20 --max-frame=108000 &
+    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
+                            --identifier=$identifier --game=$game $aux \
+                            --algorithm=rbi --play-episodes-interval=20 --max-frame=108000 &
+    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
+                            --identifier=$identifier --game=$game $aux \
+                            --algorithm=rbi --play-episodes-interval=20 --max-frame=108000 &
+
+    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --postprocess $resume2 $args \
+                            --identifier=$identifier --game=$game $aux --algorithm=rbi &
+fi
