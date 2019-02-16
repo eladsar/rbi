@@ -24,11 +24,15 @@ sh learner.sh \<algorithm> \<identifier> \<game> \<new|resume>
 resume is a number of experiment to resume.
 For example:
 
+```bash
 sh learner.sh rbi qbert_debug qbert new
+```
 
 starts a new experiment, while:
 
+```bash
 sh learner.sh rbi qbert_debug qbert 3
+```
 
 resumes experiment 3 with identifier qbert_debug
 
