@@ -48,18 +48,20 @@ right now there are two evaluation players in each actors script
 
 ### Setup prerequisites before running the code
 
-To login: 
+#### To login: 
 ssh \<username>@\<server-address>
 
 Use ssh-keygen and ssh-copy-id to avoid passwords:
+```bash
 ssh-keygen
 ssh-copy-id -i ~/.ssh/id_rsa user@host
+```
 
-Install Anaconda:
+#### Install Anaconda:
 copy anaconda file to server and run:
 sh Anaconda3-2018.12-Linux-x86_64.sh
 
-Install Tmux:
+#### Install Tmux:
 make new directory called tmux_tmp
 copy ncurses.tar.gz and tmx-2.5.tar.gz to tmux_tmp directory
 copy install_tmux.sh to server and run
@@ -67,23 +69,36 @@ copy install_tmux.sh to server and run
 
 setup directories, clone rbi and setup conda environment
 
+```bash
 mkdir -p ~/data/rbi/results
-
 mkdir -p ~/data/rbi/logs
-
 mkdir -p ~/projects
-
 cd ~/projects
-
 git clone https://github.com/eladsar/rbi.git
-
 cd ~/projects/rbi
-
 conda env create -f install/environment.yml
-
 source activate torch1
-
 pip install atari-py
+```
 
+### Docker
+
+We also provide a docker file and instructions to build and run the simulation in a docker container.
+
+Please first, install nvidia-docker:
+
+https://github.com/NVIDIA/nvidia-docker
+
+To build the docker container:
+
+cd install
+```bash
+docker image build --tag local:rbi .
+```
+
+To run the docker container:
+```bash
+nvidia-docker run --rm -it --net=host --ipc=host --name rbi1 local:rbi bash
+```
 
 
