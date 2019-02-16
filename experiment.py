@@ -2,6 +2,7 @@ import time
 import os
 import sys
 import numpy as np
+import pandas as pd
 
 from tensorboardX import SummaryWriter
 
@@ -37,19 +38,23 @@ class Experiment(object):
         if self.load_model:
             if self.resume >= 0:
                 for d in dirs:
-                    if "%s_exp_%04d_" % (args.identifier, self.resume) in d:
+                    if "%s_%s_%s_exp_%04d_" % (args.game, args.algorithm, args.identifier, self.resume) in d:
                         self.exp_name = d
                         self.exp_num = self.resume
                         break
+            elif self.resume == -1:
+
+                ds = [d for d in dirs if "%s_exp" % args.identifier in d]
+                ns = np.array([int(d.split("_")[-3]) for d in ds])
+                self.exp_name = ds[np.argmax(ns)]
             else:
                 raise Exception("Non-existing experiment")
 
         if not self.exp_name:
             # count similar experiments
-            n = sum([1 for d in dirs if "%s_exp" % args.identifier in d])
-            self.exp_name = "%s_exp_%04d_%s" % (args.identifier, n, consts.exptime)
+            n = max([int(d.split("_")[-3]) for d in dirs if "%s_exp" % args.identifier in d]) + 1
+            self.exp_name = "%s_%s_%s_exp_%04d_%s" % (args.game, args.algorithm, args.identifier, n, consts.exptime)
             self.load_model = False
-
             self.exp_num = n
 
         # init experiment parameters
@@ -281,6 +286,8 @@ class Experiment(object):
         uuid = "%012d" % np.random.randint(1e12)
         agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint, choose=True)
 
+        best_score = -np.inf
+
         tensorboard_path = os.path.join(self.results_dir, uuid)
         os.makedirs(tensorboard_path)
 
@@ -384,6 +391,11 @@ class Experiment(object):
                 player_params['frames'] = np.percentile(frames, 90)
                 player_params['high'] = np.percentile(scores, 90)
 
+                # save best player checkpoint
+                if player_name != "behavioral" and score.mean() > best_score:
+                    best_score = score.mean()
+                    agent.save_checkpoint(self.checkpoint_best, {'n': n, 'score': score})
+
                 if args.tensorboard:
 
                     self.writer.add_scalar('score/%s' % player_name, float(score.mean()), n)
@@ -411,6 +423,39 @@ class Experiment(object):
                 break
 
         print("End of evaluation")
+
+    def postprocess(self):
+
+        run_dir = os.path.join(self.root, "scores")
+        save_dir = os.path.join(self.root, "postprocess")
+
+        if not os.path.isdir(save_dir):
+            os.mkdir(save_dir)
+        elif os.path.isfile(os.path.join(save_dir, "df_reroute")) and os.path.isfile(
+                os.path.join(save_dir, "df_behavioral")):
+            return
+
+        results_reroute = {'score': [], 'frame': [], 'n': [], 'time': []}
+        results_behavioral = {'score': [], 'frame': [], 'n': [], 'time': []}
+
+        for d in os.listdir(run_dir):
+            print(d)
+            for f in os.listdir(os.path.join(run_dir, d)):
+
+                if "behavioral" in f:
+                    for key in results_behavioral:
+                        item = np.load(os.path.join(run_dir, d, f)).item()
+                        results_behavioral[key] += item[key]
+                else:
+                    for key in results_reroute:
+                        item = np.load(os.path.join(run_dir, d, f)).item()
+                        results_reroute[key] += item[key]
+
+        df_reroute = pd.DataFrame(results_reroute)
+        df_behavioral = pd.DataFrame(results_behavioral)
+
+        df_reroute.to_pickle(os.path.join(save_dir, "df_reroute"))
+        df_behavioral.to_pickle(os.path.join(save_dir, "df_behavioral"))
 
     def print_actions_statistics(self, a_agent, a_player, n, Hbeta, Hpi, adv_a, q_a, r_mc):
 

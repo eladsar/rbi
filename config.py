@@ -36,11 +36,11 @@ parser.add_argument('--base-dir', type=str, default=base_dir, help='Base directo
 
 
 # booleans
-boolean_feature("load-last-model", False, 'Load the last saved model if possible')
-boolean_feature("load-best-model", False, 'Load the best saved model if possible')
-boolean_feature("load-behavioral", False, 'Load behavioral model')
+boolean_feature("load-last-model", False, 'Load the last saved model')
+boolean_feature("load-best-model", False, 'Load the best saved model')
 boolean_feature("learn", False, 'Learn from the observations')
 boolean_feature("play", False, 'Test the learned model via playing')
+boolean_feature("postprocess", False, 'Postprocess evaluation results')
 boolean_feature("multiplay", False, 'Send samples to memory from multiple parallel players')
 boolean_feature("evaluate", False, 'evaluate player')
 boolean_feature("clean", False, 'Clean old trajectories')
@@ -52,7 +52,6 @@ parser.add_argument('--n-steps', type=int, default=6, metavar='STEPS', help='Num
 boolean_feature("dropout", False, "Use Dropout layer")
 boolean_feature("reward-shape", False, "Shape reward with sign(r)*log(1+|r|)")
 boolean_feature("infinite-horizon", False, "Don't end episode in EOL")
-boolean_feature("frame-limit", True, "Limit episode frames")
 parser.add_argument('--target', type=str, default='tde', help='Target method [td|tde|mc]')
 
 # parameters

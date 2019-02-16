@@ -163,12 +163,13 @@ class RBIAgent(Agent):
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(v_target))
 
             is_value = tde ** (-self.priority_beta)
+
+            is_policy = is_value
+
             is_value = is_value / is_value.max()
 
-            # is_policy = is_value
-
             v_diff = (q * (beta - pi)).mean().abs()
-            is_policy = ((v_diff + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_alpha
+            is_policy = is_policy * ((v_diff + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_alpha
             is_policy = is_policy / is_policy.max()
 
             loss_value = (self.q_loss(q_a, r) * is_value).mean()

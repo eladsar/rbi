@@ -33,6 +33,10 @@ def main():
             logger.info("Start a multiplay Session")
             exp.multiplay()
 
+        elif args.postprocess:
+            logger.info("Create pandas Dataframe")
+            exp.postprocess()
+
         elif args.clean:
             logger.info("Clean old trajectories")
             exp.clean()
