@@ -49,7 +49,6 @@ class Env(object):
             self.max_length = consts.max_length[args.game]
 
         self.image = None
-        self.frame_limit = args.frame_limit
         self.max_score = consts.max_score[args.game]
 
     def reset(self):

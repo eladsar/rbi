@@ -52,7 +52,7 @@ class Experiment(object):
 
         if not self.exp_name:
             # count similar experiments
-            n = max([int(d.split("_")[-3]) for d in dirs if "%s_exp" % args.identifier in d]) + 1
+            n = max([-1] + [int(d.split("_")[-3]) for d in dirs if "%s_exp" % args.identifier in d]) + 1
             self.exp_name = "%s_%s_%s_exp_%04d_%s" % (args.game, args.algorithm, args.identifier, n, consts.exptime)
             self.load_model = False
             self.exp_num = n
