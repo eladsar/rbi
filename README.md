@@ -95,8 +95,8 @@ https://github.com/NVIDIA/nvidia-docker
 
 To build the docker container:
 
-cd install
 ```bash
+cd install
 docker image build --tag local:rbi .
 ```
 

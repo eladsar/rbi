@@ -154,23 +154,20 @@ class RBIAgent(Agent):
             _, _, _, q, q_a = self.value_net(s, a, self.pi_rand_batch)
             _, _, _, q_tag, _ = self.target_net(s_tag, a, self.pi_rand_batch)
 
-            q = q.detach()
-            v_eval = (q * pi).sum(dim=1).unsqueeze(1)
-            # adv_eval = q - v_eval
-            v_eval.squeeze_(1)
+            # q = q.detach()
+            # v_eval = (q * pi).sum(dim=1)
             v_target = (q_tag * pi_tag).sum(dim=1).detach()
 
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(v_target))
 
             is_value = tde ** (-self.priority_beta)
-
-            is_policy = is_value
-
             is_value = is_value / is_value.max()
 
-            v_diff = (q * (beta - pi)).mean().abs()
-            is_policy = is_policy * ((v_diff + 0.01) / (v_eval.abs() + 0.01)) ** self.priority_alpha
-            is_policy = is_policy / is_policy.max()
+            # v_diff = (q * (beta - pi)).abs().sum(dim=1)
+            # is_policy = ((v_diff + 0.01) / (v_eval.abs() + 0.01) / tde) ** self.priority_alpha
+            # is_policy = is_policy / is_policy.max()
+
+            is_policy = is_value
 
             loss_value = (self.q_loss(q_a, r) * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
