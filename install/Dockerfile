@@ -14,7 +14,7 @@ RUN  apt-get update && \
 RUN apt-get install -y openssh-server
 RUN  rm -rf /var/lib/apt/lists/*
 
-
+RUN mkdir /var/run/sshd
 RUN ssh-keygen -A
 ADD ./sshd_config /etc/ssh/sshd_config
 RUN echo 'root:aimlab' | chpasswd
@@ -40,6 +40,7 @@ RUN conda update -n base -c defaults conda
 RUN conda env create --file /workspace/projects/rbi/install/environment.yml
 RUN /opt/conda/envs/torch1/bin/pip install atari-py
 
-CMD /usr/sbin/sshd -D
+#CMD /usr/sbin/sshd -D
+#CMD service ssh start
 
 # source activate torch1 && sh run_rbi_learner.sh debug qbert 0
