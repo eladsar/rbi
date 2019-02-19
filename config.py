@@ -10,8 +10,8 @@ username = pwd.getpwuid(os.geteuid()).pw_name
 
 if "gpu" in socket.gethostname():
     base_dir = os.path.join('/home/dsi/', username, 'data/rbi')
-elif "rey" == socket.gethostname():
-    base_dir = os.path.join('/localdata/', username, 'rbi')
+elif "root" == username:
+    base_dir = r'/workspace/data/rbi/'
 else:
     base_dir = os.path.join('/data/', username, 'rbi_atari')
 
