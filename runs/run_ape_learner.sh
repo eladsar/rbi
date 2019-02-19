@@ -25,7 +25,7 @@ args="--n-steps=3 --no-reward-shape --no-dropout --no-infinite-horizon \
 --random-initialization=2500 --player-replay-size=2500 --update-memory-interval=100 \
 --load-memory-interval=100 --replay-updates-interval=2500 --replay-memory-size=2000000 --n-actors=16"
 
-CUDA_VISIBLE_DEVICES=0, python $loc/main.py --learn --identifier=$identifier --game= $resume $args $aux --algorithm=ape
+CUDA_VISIBLE_DEVICES=0, python $loc/main.py --learn --identifier=$identifier --game=$game $resume $args $aux --algorithm=ape
 
 if [ $? -ne 0 ]; then
     CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \

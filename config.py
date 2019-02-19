@@ -216,6 +216,8 @@ class Consts(object):
                         "kangaroo":     100,
     }
 
+    print("Game: %s" % args.game)
+
     rec_type = np.dtype([('fr', np.int), ('a', np.int), ('pi', np.float32, len(np.nonzero(actions[args.game])[0])),
                              ('h_beta', np.float32, args.hidden_features_rnn), ('h_q', np.float32, args.hidden_features_rnn),
                              ('ep', np.int), ('t', np.float32), ('fr_s', np.int), ('fr_e', np.int),
