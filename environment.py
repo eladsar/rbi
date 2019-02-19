@@ -42,10 +42,13 @@ class Env(object):
         self.nop = consts.nop
 
         tail = int(np.log(0.01) / np.log(args.discount))
-        self.max_length = consts.max_length[args.game] + tail * self.skip
+
+        if args.multiplay:
+            self.max_length = consts.max_length[args.game] + tail * self.skip
+        else:
+            self.max_length = consts.max_length[args.game]
 
         self.image = None
-        self.frame_limit = args.frame_limit
         self.max_score = consts.max_score[args.game]
 
     def reset(self):
@@ -88,7 +91,7 @@ class Env(object):
         # t = self.ale.game_over()
 
         # self.last_action = action
-        self.t = int(t or ((self.k * self.skip >= self.max_length) and self.frame_limit) or (self.score >= self.max_score))
+        self.t = int(t or (self.k * self.skip >= self.max_length) or (self.score >= self.max_score))
 
         self.image = np.maximum(o[0], o[1])
         self.frame = cv2.resize(self.image.astype(np.float32), (img_width, img_height), interpolation=interpolation) / 256.

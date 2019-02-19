@@ -22,16 +22,20 @@ def main():
             exp.learn()
 
         elif args.play:
-            logger.info("Enter RBI playing Session, I hope it goes well")
+            logger.info("Evaluate final performance")
             exp.play()
 
-        elif args.choose:
-            logger.info("Choosing best player")
-            exp.choose()
+        elif args.evaluate: # elad
+            logger.info("Enter RBI playing Session, I hope it goes well")
+            exp.evaluate()
 
         elif args.multiplay:
             logger.info("Start a multiplay Session")
             exp.multiplay()
+
+        elif args.postprocess:
+            logger.info("Create pandas Dataframe")
+            exp.postprocess()
 
         elif args.clean:
             logger.info("Clean old trajectories")

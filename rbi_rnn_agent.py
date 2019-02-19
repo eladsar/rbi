@@ -16,7 +16,7 @@ from model import BehavioralRNN, DuelRNN
 from memory_rnn import ObservationsRNNMemory, ObservationsRNNBatchSampler
 from agent import Agent
 from environment import Env
-from preprocess import get_expected_value, release_file, lock_file, get_rho_is, _get_mc_value, h_torch, hinv_torch
+from preprocess import release_file, lock_file, get_rho_is, get_td_value, get_mc_value, h_torch, hinv_torch, get_expected_value
 import cv2
 import os
 import time
@@ -57,11 +57,6 @@ class RBIRNNAgent(Agent):
             self.frame = 0
             self.states = 0
 
-            print("Explorer player")
-            self.trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-            self.screen_dir = os.path.join(self.explore_dir, "screen")
-            self.readlock = os.path.join(self.list_dir, "readlock_explore.npy")
-
         else:
 
             # self.target_net = DuelNet().to(self.device)
@@ -70,22 +65,6 @@ class RBIRNNAgent(Agent):
             self.train_sampler = ObservationsRNNBatchSampler(root_dir)
             self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_sampler=self.train_sampler,
                                                             num_workers=args.cpu_workers, pin_memory=True, drop_last=False)
-
-            try:
-                os.mkdir(self.best_player_dir)
-                os.mkdir(self.exploit_dir)
-                os.mkdir(self.explore_dir)
-                os.mkdir(os.path.join(self.exploit_dir, "trajectory"))
-                os.mkdir(os.path.join(self.exploit_dir, "screen"))
-                os.mkdir(os.path.join(self.explore_dir, "trajectory"))
-                os.mkdir(os.path.join(self.explore_dir, "screen"))
-                os.mkdir(self.list_dir)
-                np.save(self.writelock, 0)
-                np.save(self.episodelock, 0)
-                np.save(os.path.join(self.list_dir, "readlock_explore.npy"), [])
-                np.save(os.path.join(self.list_dir, "readlock_exploit.npy"), [])
-            except FileExistsError:
-                pass
 
         # configure learning
 
@@ -273,34 +252,6 @@ class RBIRNNAgent(Agent):
                     if (n + self.n_offset) >= n_tot:
                         break
 
-    def clean(self):
-
-        while True:
-
-            time.sleep(2)
-
-            screen_dir = os.path.join(self.explore_dir, "screen")
-            trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-
-            try:
-                del_inf = np.load(os.path.join(self.list_dir, "old_explore.npy"))
-            except (IOError, ValueError):
-                continue
-            traj_min = del_inf[0] - 32
-            episode_list = set()
-
-            for traj in os.listdir(trajectory_dir):
-                traj_num = int(traj.split(".")[0])
-                if traj_num < traj_min:
-                    traj_data = np.load(os.path.join(trajectory_dir, traj))
-                    # traj_data = pd.read_pickle(os.path.join(trajectory_dir, traj))
-                    for d in traj_data['ep']:
-                        episode_list.add(d)
-                    os.remove(os.path.join(trajectory_dir, traj))
-
-            for ep in episode_list:
-                shutil.rmtree(os.path.join(screen_dir, str(ep)))
-
     def play(self, n_tot, save=True, load=True, fix=False):
 
         for i in range(n_tot):
@@ -377,7 +328,7 @@ class RBIRNNAgent(Agent):
                         pi_adv = pi_adv / (np.sum(pi_adv))
 
                         pi = (1 - self.mix) * pi + self.mix * pi_adv
-                        pi_mix = self.eps_pre * self.pi_rand + (1 - self.eps_pre) * pi
+                        pi_mix = self.epsilon * self.pi_rand + (1 - self.epsilon) * pi
 
                     elif self.player == "behavioral":
                         pi_mix = beta.copy()
@@ -662,45 +613,6 @@ class RBIRNNAgent(Agent):
                 yield True
                 if self.n_offset >= self.n_tot:
                     break
-
-    def set_player(self, player, cmin=None, cmax=None, delta=None, eps_pre=None,
-                   eps_post=None, temp_soft=None, behavioral_avg_score=None,
-                   behavioral_avg_frame=None, explore_threshold=None):
-
-        self.player = player
-
-        if eps_pre is not None:
-            self.eps_pre = eps_pre * self.action_space / (self.action_space - 1)
-
-        if eps_post is not None:
-            self.eps_post = eps_post * self.action_space / (self.action_space - 1)
-
-        if temp_soft is not None:
-            self.temp_soft = temp_soft
-
-        if cmin is not None:
-            self.cmin = cmin
-
-        if cmax is not None:
-            self.cmax = cmax
-
-        if delta is not None:
-            self.delta = delta
-
-        if explore_threshold is not None:
-            self.explore_threshold = explore_threshold
-
-        if behavioral_avg_score is not None:
-            self.behavioral_avg_score = behavioral_avg_score
-
-        if behavioral_avg_frame is not None:
-            self.behavioral_avg_frame = behavioral_avg_frame
-
-        self.off = True if max(self.eps_post, self.eps_pre) > 0 else False
-
-        self.trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-        self.screen_dir = os.path.join(self.explore_dir, "screen")
-        self.readlock = os.path.join(self.list_dir, "readlock_explore.npy")
 
     def demonstrate(self, n_tot):
 

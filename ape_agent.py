@@ -2,23 +2,21 @@ import torch
 import torch.utils.data
 import torch.utils.data.sampler
 import torch.optim.lr_scheduler
+import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
-from torch.nn import functional as F
 import psutil
 
 from config import consts, args
+from model import DuelNet
 
-from model import DQN
-
-from memory import DQNMemory, DQNBatchSampler
+from memory import ReplayBatchSampler, Memory, collate
 from agent import Agent
 from environment import Env
-from preprocess import get_tde_value, lock_file, release_file, h_torch, hinv_torch, _get_mc_value
+from preprocess import get_tde_value, lock_file, release_file, h_torch, hinv_torch, get_mc_value, get_td_value, state_to_img
 import cv2
 import os
 import time
-import shutil
 
 imcompress = cv2.IMWRITE_PNG_COMPRESSION
 compress_level = 2
@@ -30,14 +28,25 @@ class ApeAgent(Agent):
     def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
 
         print("Learning with Ape Agent")
-        super(ApeAgent, self).__init__(root_dir, checkpoint)
+        super(ApeAgent, self).__init__(root_dir, checkpoint, player)
 
-        self.dqn_net = DQN().to(self.device)
+        self.value_net = DuelNet()
+        self.target_net = DuelNet()
+
+        if torch.cuda.device_count() > 1:
+            self.value_net = nn.DataParallel(self.value_net)
+            self.target_net = nn.DataParallel(self.target_net)
+
+        self.value_net.to(self.device)
+        self.target_net.to(self.device)
+        self.target_net.load_state_dict(self.value_net.state_dict())
 
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
-        self.a_zeros_batch = self.a_zeros.repeat(self.batch, 1)
 
         self.pi_rand = np.ones(self.action_space) / self.action_space
+        self.pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(self.batch, 1).to(self.device)
+
+        self.q_loss = nn.SmoothL1Loss(reduction='none')
 
         if player:
 
@@ -46,69 +55,60 @@ class ApeAgent(Agent):
             self.trajectory = []
             self.images = []
             self.choices = np.arange(self.action_space, dtype=np.int)
-            self.pi_rand = np.ones(self.action_space) / self.action_space
             self.n_replay_saved = 1
             self.frame = 0
             self.states = 0
 
-            print("Explorer player")
-            self.trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-            self.screen_dir = os.path.join(self.explore_dir, "screen")
-            self.readlock = os.path.join(self.list_dir, "readlock_explore.npy")
-
         else:
 
             # datasets
-            self.train_dataset = DQNMemory(root_dir)
-            self.train_sampler = DQNBatchSampler(root_dir)
+            self.train_dataset = Memory(root_dir)
+            self.train_sampler = ReplayBatchSampler(root_dir)
             self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_sampler=self.train_sampler,
-                                                            num_workers=args.cpu_workers, pin_memory=True, drop_last=False)
-            try:
-                os.mkdir(self.best_player_dir)
-                os.mkdir(self.exploit_dir)
-                os.mkdir(self.explore_dir)
-                os.mkdir(os.path.join(self.exploit_dir, "trajectory"))
-                os.mkdir(os.path.join(self.exploit_dir, "screen"))
-                os.mkdir(os.path.join(self.explore_dir, "trajectory"))
-                os.mkdir(os.path.join(self.explore_dir, "screen"))
-                os.mkdir(self.list_dir)
-                np.save(self.writelock, 0)
-                np.save(self.episodelock, 0)
-                np.save(os.path.join(self.list_dir, "readlock_explore.npy"), [])
-                np.save(os.path.join(self.list_dir, "readlock_exploit.npy"), [])
-            except FileExistsError:
-                pass
+                                                            collate_fn=collate, num_workers=args.cpu_workers,
+                                                            pin_memory=True, drop_last=False)
 
         # configure learning
 
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
-        self.optimizer = torch.optim.Adam(self.dqn_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
+        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
         self.n_offset = 0
 
     def save_checkpoint(self, path, aux=None):
 
-        state = {'dqn_net': self.dqn_net.state_dict(),
-                 'optimizer': self.optimizer.state_dict(),
-                 'aux': aux}
+        if torch.cuda.device_count() > 1:
+            state = {'value_net': self.value_net.module.state_dict(),
+                     'target_net': self.target_net.module.state_dict(),
+                     'optimizer_value': self.optimizer_value.state_dict(),
+                     'aux': aux}
+        else:
+            state = {'value_net': self.value_net.state_dict(),
+                     'target_net': self.target_net.state_dict(),
+                     'optimizer_value': self.optimizer_value.state_dict(),
+                     'aux': aux}
 
         torch.save(state, path)
 
     def load_checkpoint(self, path):
 
         state = torch.load(path, map_location="cuda:%d" % self.cuda_id)
-        self.dqn_net.load_state_dict(state['dqn_net'])
-        self.optimizer.load_state_dict(state['optimizer'])
+
+        if torch.cuda.device_count() > 1:
+            self.value_net.module.load_state_dict(state['value_net'])
+            self.target_net.module.load_state_dict(state['target_net'])
+        else:
+            self.value_net.load_state_dict(state['value_net'])
+            self.target_net.load_state_dict(state['target_net'])
+
+        self.optimizer_value.load_state_dict(state['optimizer_value'])
         self.n_offset = state['aux']['n']
 
         return state['aux']
 
     def learn(self, n_interval, n_tot):
 
-        self.dqn_net.train()
-
-        target_net = DQN().to(self.device)
-        target_net.load_state_dict(self.dqn_net.state_dict())
-        target_net.eval()
+        self.value_net.train()
+        self.target_net.eval()
 
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
                    'a_player': [], 'loss_std': [], 'mc_val': [], "Hbeta": [], "Hpi": [],
@@ -116,44 +116,39 @@ class ApeAgent(Agent):
 
         for n, sample in tqdm(enumerate(self.train_loader)):
 
+            n = self.n_offset + n + 1
+
             s = sample['s'].to(self.device)
             a = sample['a'].to(self.device).unsqueeze_(1)
             r = sample['r'].to(self.device)
-            aux = sample['aux'].to(self.device).unsqueeze_(1)
-
             t = sample['t'].to(self.device)
             s_tag = sample['s_tag'].to(self.device)
-            aux_tag = sample['aux_tag'].to(self.device).unsqueeze_(1)
+            tde = sample['tde'].to(self.device)
 
-            self.dqn_net.eval()
-            _, _, _, q, q_a_eval = self.dqn_net(s, a, aux)
-            q_a_eval = q_a_eval.detach()
-
-            _, _, _, q_tag_eval, _ = self.dqn_net(s_tag, self.a_zeros_batch, aux_tag)
+            _, _, _, q_tag_eval, _ = self.value_net(s_tag, a, self.pi_rand_batch)
             q_tag_eval = q_tag_eval.detach()
-            self.dqn_net.train()
 
-            _, _, _, q_tag_target, _ = target_net(s_tag, self.a_zeros_batch, aux_tag)
+            _, _, _, q_tag_target, _ = self.target_net(s_tag, a, self.pi_rand_batch)
             q_tag_target = q_tag_target.detach()
 
-            _, _, _, _, q_a = self.dqn_net(s, a, aux)
+            _, _, _, q, q_a = self.value_net(s, a, self.pi_rand_batch)
 
             a_tag = torch.argmax(q_tag_eval, dim=1).unsqueeze(1)
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(q_tag_target.gather(1, a_tag).squeeze(1)))
 
-            is_value = ((r - q_a_eval).abs() + self.epsilon_a) ** self.priority_beta
-            is_value = is_value / is_value.mean()
-            loss_value = ((q_a - r) ** 2 * is_value).mean()
+            is_value = tde ** (-self.priority_beta)
+            is_value = is_value / is_value.max()
+            loss_value = (self.q_loss(q_a, r) * is_value).mean()
 
             # Learning part
 
-            self.optimizer.zero_grad()
+            self.optimizer_value.zero_grad()
             loss_value.backward()
-            self.optimizer.step()
+            self.optimizer_value.step()
 
             # collect actions statistics
 
-            if not (n + 1) % 50:
+            if not n % 50:
 
                 a_index_np = a.squeeze(1).data.cpu().numpy()
 
@@ -181,15 +176,15 @@ class ApeAgent(Agent):
                 results['loss_std'].append(0)
                 results['n'].append(n)
 
-                if not (n+1) % self.update_memory_interval:
+                if not n % self.update_memory_interval:
                     # save agent state
                     self.save_checkpoint(self.snapshot_path, {'n': self.n_offset + n + 1})
 
-                if not (n+1) % self.update_target_interval:
+                if not n % self.update_target_interval:
                     # save agent state
-                    target_net.load_state_dict(self.dqn_net.state_dict())
+                    self.target_net.load_state_dict(self.value_net.state_dict())
 
-                if not (n+1) % n_interval:
+                if not n % n_interval:
                     results['act_diff'] = np.concatenate(results['act_diff'])
                     results['a_agent'] = np.concatenate(results['a_agent'])
                     results['adv_a'] = np.concatenate(results['adv_a'])
@@ -199,40 +194,16 @@ class ApeAgent(Agent):
                     results['image'] = s[0, :-1, :, :].data.cpu()
 
                     yield results
-                    self.dqn_net.train()
+                    self.value_net.train()
                     results = {key: [] for key in results}
 
-                    if (n + self.n_offset) >= n_tot:
+                    if n >= n_tot:
                         break
 
-    def clean(self):
-
-        while True:
-
-            time.sleep(2)
-
-            screen_dir = os.path.join(self.explore_dir, "screen")
-            trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-
-            try:
-                del_inf = np.load(os.path.join(self.list_dir, "old_explore.npy"))
-            except (IOError, ValueError):
-                continue
-            traj_min = del_inf[0] - 32
-            episode_list = set()
-
-            for traj in os.listdir(trajectory_dir):
-                traj_num = int(traj.split(".")[0])
-                if traj_num < traj_min:
-                    traj_data = np.load(os.path.join(trajectory_dir, traj))
-                    for d in traj_data['ep']:
-                        episode_list.add(d)
-                    os.remove(os.path.join(trajectory_dir, traj))
-
-            for ep in episode_list:
-                shutil.rmtree(os.path.join(screen_dir, str(ep)))
-
     def play(self, n_tot, save=True, load=True, fix=False):
+
+        pi_rand = np.ones(self.action_space) / self.action_space
+        pi_rand = torch.FloatTensor(pi_rand).unsqueeze(0).to(self.device)
 
         for i in range(n_tot):
 
@@ -241,16 +212,15 @@ class ApeAgent(Agent):
             rewards = [[]]
             q_val = []
             lives = self.env.lives
-            trigger = False
 
             while not fix:
                 try:
                     self.load_checkpoint(self.snapshot_path)
+                    break
                 except:
                     time.sleep(0.5)
-                    self.load_checkpoint(self.snapshot_path)
 
-            self.dqn_net.eval()
+            self.value_net.eval()
 
             while not self.env.t:
 
@@ -260,14 +230,11 @@ class ApeAgent(Agent):
                     except:
                         pass
 
-                    self.dqn_net.eval()
+                    self.value_net.eval()
 
                 s = self.env.s.to(self.device)
-                trigger = trigger or (self.env.score > self.behavioral_avg_score * self.explore_threshold)
                 # get aux data
-                aux = self.env.aux.to(self.device)
-
-                _, _, _, q, _ = self.dqn_net(s, self.a_zeros, aux)
+                _, _, _, q, _ = self.value_net(s, self.a_zeros, pi_rand)
 
                 q = q.squeeze(0).data.cpu().numpy()
 
@@ -277,19 +244,10 @@ class ApeAgent(Agent):
                     pi[np.argmax(q)] = 1
 
                 else:
+
                     pi = self.pi_rand
 
-                if self.off:
-
-                    if trigger:
-                        exploration = self.eps_post
-                    else:
-                        exploration = self.eps_pre
-
-                    pi_mix = exploration * self.pi_rand + (1 - exploration) * pi
-
-                else:
-                    pi_mix = pi
+                pi_mix = self.epsilon * self.pi_rand + (1 - self.epsilon) * pi
 
                 pi_mix = pi_mix.clip(0, 1)
                 pi_mix = pi_mix / pi_mix.sum()
@@ -307,12 +265,8 @@ class ApeAgent(Agent):
 
                 self.frame += 1
 
-            # tde_val, t_val = get_tde_value(rewards, self.discount, self.n_steps)
-
-            mc_val = _get_mc_value(rewards, None, self.discount, None)
+            mc_val = get_mc_value(rewards, None, self.discount, None)
             q_val = np.array(q_val)
-
-            # print("mc_val: %d | q_val: %d" % (len(mc_val), len(q_val)))
 
             yield {'score': self.env.score,
                    'frames': self.env.k, "n": self.n_offset, "mc": mc_val, "q": q_val}
@@ -327,8 +281,8 @@ class ApeAgent(Agent):
         n_players = self.n_players
 
         player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
-        explore_threshold = np.zeros(self.n_players)
         mp_explore = 0.4 ** (1 + 7 * player_i)
+        explore_threshold = player_i
 
         mp_env = [Env() for _ in range(n_players)]
         self.frame = 0
@@ -337,13 +291,17 @@ class ApeAgent(Agent):
         mp_pi_rand = np.repeat(np.expand_dims(self.pi_rand, axis=0), n_players, axis=0)
         range_players = np.arange(n_players)
         rewards = [[[]] for _ in range(n_players)]
+        v_target = [[[]] for _ in range(n_players)]
         episode = [[] for _ in range(n_players)]
+        q_a = [[] for _ in range(n_players)]
         image_dir = ['' for _ in range(n_players)]
         trajectory = [[] for _ in range(n_players)]
 
         screen_dir = [os.path.join(self.explore_dir, "screen")] * n_players
         trajectory_dir = [os.path.join(self.explore_dir, "trajectory")] * n_players
         readlock = [os.path.join(self.list_dir, "readlock_explore.npy")] * n_players
+
+        pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(n_players, 1).to(self.device)
 
         for i in range(n_players):
             mp_env[i].reset()
@@ -370,15 +328,18 @@ class ApeAgent(Agent):
                 except:
                     pass
 
-                self.dqn_net.eval()
+                self.value_net.eval()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
-            aux = torch.cat([env.aux for env in mp_env]).to(self.device)
-            aux_np = aux.cpu().numpy().astype(np.float32)
 
-            _, _, _, q, _ = self.dqn_net(s, a_zeros_mp, aux)
+            _, _, _, q, _ = self.value_net(s, a_zeros_mp, pi_rand_batch)
 
             q = q.data.cpu().numpy()
+
+            mp_trigger = np.logical_and(
+                np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
+                explore_threshold >= 0)
+            exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
 
             if self.n_offset >= self.random_initialization:
 
@@ -388,11 +349,11 @@ class ApeAgent(Agent):
             else:
                 pi = mp_pi_rand
 
-            mp_trigger = np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold
-            exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger + (1 - mp_trigger) * self.eps_pre, axis=1), self.action_space, axis=1)
             pi_mix = pi * (1 - exploration) + exploration * mp_pi_rand
             pi_mix = pi_mix.clip(0, 1)
             pi_mix = pi_mix / np.repeat(np.expand_dims(pi_mix.sum(axis=1), axis=1), self.action_space, axis=1)
+
+            v_expected = (q * pi).sum(axis=1)
 
             for i in range(n_players):
 
@@ -404,35 +365,45 @@ class ApeAgent(Agent):
                 episode[i].append(np.array((self.frame, a, pi[i],
                                             None, None,
                                             episode_num[i], 0., 0, 0,
-                                            0., 1., 1., 0, 1., aux_np[i]), dtype=self.rec_type))
+                                            0., 1., 1., 0, 1., 0), dtype=self.rec_type))
 
                 env.step(a)
 
                 if lives[i] > env.lives:
                     rewards[i].append([])
+                    v_target[i].append([])
                 lives[i] = env.lives
 
                 rewards[i][-1].append(env.r)
+                v_target[i][-1].append(v_expected[i])
+                q_a[i].append(q[i][a])
 
                 if env.t:
 
                     td_val, t_val = get_tde_value(rewards[i], self.discount, self.n_steps)
+                    tde = np.abs(np.array(q_a[i]) - get_td_value(rewards[i], v_target[i], self.discount, self.n_steps))
+                    v_scale = np.concatenate(v_target[i])
+
+                    tde = ((tde + 0.01) / (np.abs(v_scale) + 0.01)) ** self.priority_alpha
 
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
                     episode_df['t'] = t_val[self.history_length - 1:self.max_length]
+                    episode_df['tde'] = tde[self.history_length - 1:self.max_length]
 
                     trajectory[i].append(episode_df)
 
-                    print("rbi | st: %d | sc: %d | e: %g | n-step: %s | n %d | avg: %g" %
-                          (self.frame, env.score, mp_explore[i], str(self.n_steps), self.n_offset,
-                           self.behavioral_avg_score))
+                    print("ape | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
+                        (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), mp_trigger[i],
+                         time.time() - self.start_time, self.n_offset, self.behavioral_avg_score,
+                         self.behavioral_avg_frame))
 
                     env.reset()
                     episode[i] = []
+                    q_a[i] = []
                     rewards[i] = [[]]
+                    v_target[i] = [[]]
                     lives[i] = env.lives
-                    mp_trigger[i] = 0
 
                     # get new episode number
 
@@ -481,74 +452,28 @@ class ApeAgent(Agent):
             if self.n_offset >= self.n_tot:
                 break
 
-    def set_player(self, player, cmin=None, cmax=None, delta=None, eps_pre=None,
-                   eps_post=None, temp_soft=None, behavioral_avg_score=None,
-                   behavioral_avg_frame=None, explore_threshold=None):
-
-        self.player = player
-
-        if eps_pre is not None:
-            self.eps_pre = eps_pre
-
-        if eps_post is not None:
-            self.eps_post = eps_post
-
-        if temp_soft is not None:
-            self.temp_soft = temp_soft
-
-
-        if cmin is not None:
-            self.cmin = cmin
-
-        if cmax is not None:
-            self.cmax = cmax
-
-        if delta is not None:
-            self.delta = delta
-
-        if explore_threshold is not None:
-            self.explore_threshold = explore_threshold
-
-        if behavioral_avg_score is not None:
-            self.behavioral_avg_score = behavioral_avg_score
-
-        if behavioral_avg_frame is not None:
-            self.behavioral_avg_frame = behavioral_avg_frame
-
-        self.off = True if max(self.eps_post, self.eps_pre) > 0 else False
-
-        if self.off:
-            self.trajectory_dir = os.path.join(self.explore_dir, "trajectory")
-            self.screen_dir = os.path.join(self.explore_dir, "screen")
-        else:
-            self.trajectory_dir = os.path.join(self.exploit_dir, "trajectory")
-            self.screen_dir = os.path.join(self.exploit_dir, "screen")
-
     def demonstrate(self, n_tot):
 
-        self.dqn_net.eval()
+        self.value_net.eval()
+        pi_rand = np.ones(self.action_space) / self.action_space
+        pi_rand = torch.FloatTensor(pi_rand).unsqueeze(0).to(self.device)
 
         for i in range(n_tot):
 
             self.env.reset()
-
-            # here there is a problem when there is a varying/increasing life counter as in mspacman
 
             choices = np.arange(self.action_space, dtype=np.int)
 
             while not self.env.t:
 
                 s = self.env.s.to(self.device)
-                aux = self.env.aux.to(self.device)
+                _, _, _, q, _ = self.value_net(s, self.a_zeros, pi_rand)
 
-                v, adv, _, q, _ = self.dqn_net(s, self.a_zeros, aux)
-                v = v.squeeze(0)
-                adv = adv.squeeze(0)
                 q = q.squeeze(0).data.cpu().numpy()
-                beta = np.zeros(self.action_space)
-                beta[np.argmax(q)] = 1
 
-                pi = beta * (1 - 0.00164) + 0.00164 * self.pi_rand
+                pi_greed = np.zeros(self.action_space)
+                pi_greed[np.argmax(q)] = 1
+                pi = self.epsilon * self.pi_rand + (1 - self.epsilon) * pi_greed
 
                 pi = pi.clip(0, 1)
                 pi = pi / pi.sum()
@@ -556,15 +481,13 @@ class ApeAgent(Agent):
                 a = np.random.choice(choices, p=pi)
                 self.env.step(a)
 
-                yield {'score': self.env.score,
-                       "beta": beta,
-                       "v": v.data.cpu().numpy(),
-                       "q": q,
-                       "aux": aux.squeeze(0).data.cpu().numpy(),
-                       "adv": adv.data.cpu().numpy(),
-                       "o": s.squeeze(0).data[:3].cpu().numpy(),
-                       'frames': self.env.k,
-                       "actions": self.env.action_meanings,
+                img = state_to_img(s)
+
+                v = (pi * q).sum()
+                adv = q - v
+
+                yield {'score': self.env.score, "beta": pi, "v": v, "q": q, "adv": adv, "s": img, 'frames': self.env.k,
+                       "actions": self.env.action_meanings, "a": a
                        }
 
         raise StopIteration

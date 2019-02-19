@@ -15,6 +15,7 @@ from config import args, consts
 img_width = args.width
 img_height = args.height
 priority_eta = args.priority_eta
+priority_alpha = args.priority_alpha
 seq_length = args.seq_length
 
 # consts:
@@ -43,6 +44,7 @@ r_scale = consts.scale_reward[args.game]
 friction = args.friction_reward
 termination_reward = args.termination_reward
 reward_shape = args.reward_shape
+
 
 def convert_screen_to_rgb(img, resize=False):
     img = cv2.cvtColor(img.numpy(), img_gray2rgb)
@@ -95,7 +97,8 @@ else:
     hinv_np_tag = _idle
     hinv_torch_tag = _idle
 
-def _get_truncated_value(rewards, v_target, discount, n_steps):
+
+def get_truncated_value(rewards, v_target, discount, n_steps):
 
     if infinite_horizon:
         rewards = [list(itertools.chain(*rewards))]
@@ -120,7 +123,8 @@ def _get_truncated_value(rewards, v_target, discount, n_steps):
 
     return np.concatenate(values).astype(np.float32)
 
-def _get_mc_value(rewards, v_target, discount, n_steps):
+
+def get_mc_value(rewards, v_target, discount, n_steps):
 
     if infinite_horizon:
         rewards = [list(itertools.chain(*rewards))]
@@ -148,7 +152,7 @@ def _get_mc_value(rewards, v_target, discount, n_steps):
     return np.concatenate(values).astype(np.float32)
 
 
-def _get_td_value(rewards, v_target, discount, n_steps):
+def get_td_value(rewards, v_target, discount, n_steps):
 
     if infinite_horizon:
         rewards = [list(itertools.chain(*rewards))]
@@ -184,15 +188,6 @@ def _get_td_value(rewards, v_target, discount, n_steps):
 
     return np.concatenate(values).astype(np.float32)
 
-# get_expected_value = _get_truncated_value
-if args.target == 'td':
-    get_expected_value = _get_td_value
-elif args.target == 'mc':
-    get_expected_value = _get_mc_value
-elif args.target == 'tde':
-    get_expected_value = _get_truncated_value
-else:
-    raise NotImplementedError
 
 def get_gae_est(rewards, v_target, discount):
 
@@ -290,11 +285,12 @@ def get_tde_value(rewards, discount, n_steps):
 
     return np.concatenate(values).astype(np.float32), np.concatenate(terminals).astype(np.float32)
 
+
 def get_tde(rewards, v_target, discount, n_steps, q_expected):
 
     # tde calculations
-    td_target = _get_td_value(rewards, v_target, discount, n_steps)
-    tde = (np.abs(np.array(q_expected) - td_target) + 0.1) / (np.abs(td_target) + 0.1)
+    td_target = get_td_value(rewards, v_target, discount, n_steps)
+    tde = (np.abs(np.array(q_expected) - td_target) + 0.01) / (np.abs(td_target) + 0.01)
 
     n = seq_length - n_steps
     global_avg = tde.mean()
@@ -303,7 +299,8 @@ def get_tde(rewards, v_target, discount, n_steps, q_expected):
     max_tde = pd.Series(tde).rolling(n).max().dropna().values
     # up to here
 
-    return priority_eta * max_tde + (1 - priority_eta) * avg_td
+    return (priority_eta * max_tde + (1 - priority_eta) * avg_td) ** priority_alpha
+
 
 def get_gtd_value(rewards, v_target, discount, mu, sigma):
 
@@ -345,6 +342,25 @@ def get_gtd_value(rewards, v_target, discount, mu, sigma):
         values.append(val)
 
     return np.concatenate(values).astype(np.float32)
+
+
+if args.target == 'td':
+    get_expected_value = get_td_value
+elif args.target == 'mc':
+    get_expected_value = get_mc_value
+elif args.target == 'tde':
+    get_expected_value = get_truncated_value
+else:
+    raise NotImplementedError
+
+
+def state_to_img(s):
+
+    img = s.squeeze(0).data[:3].cpu().numpy()
+    img = np.rollaxis(img, 0, 3)[:, :, :3]
+    img = (img * 256).astype(np.uint8)
+
+    return img
 
 
 def lock_file(file):

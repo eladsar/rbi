@@ -1,8 +1,8 @@
-import csv
 import time
 import os
 import sys
 import numpy as np
+import pandas as pd
 
 from tensorboardX import SummaryWriter
 
@@ -11,10 +11,8 @@ import time
 
 from config import consts, args
 from rbi_agent import RBIAgent
-# from ape_encoded_agent import ApeAgent
-from r2d2_agent import R2D2Agent
 from ape_agent import ApeAgent
-from ppo_agent import PPOAgent
+from r2d2_agent import R2D2Agent
 from rbi_rnn_agent import RBIRNNAgent
 
 from logger import logger
@@ -36,23 +34,28 @@ class Experiment(object):
         self.action_meanings = [consts.action_meanings[i] for i in np.nonzero(consts.actions[args.game])[0]]
         self.log_scores = args.log_scores
 
+        temp_name = "%s_%s_%s_exp" % (args.game, args.algorithm, args.identifier)
         self.exp_name = ""
         if self.load_model:
             if self.resume >= 0:
                 for d in dirs:
-                    if "%s_exp_%04d_" % (args.identifier, self.resume) in d:
+                    if "%s_%04d_" % (temp_name, self.resume) in d:
                         self.exp_name = d
                         self.exp_num = self.resume
                         break
+            elif self.resume == -1:
+
+                ds = [d for d in dirs if temp_name in d]
+                ns = np.array([int(d.split("_")[-3]) for d in ds])
+                self.exp_name = ds[np.argmax(ns)]
             else:
                 raise Exception("Non-existing experiment")
 
         if not self.exp_name:
             # count similar experiments
-            n = sum([1 for d in dirs if "%s_exp" % args.identifier in d])
-            self.exp_name = "%s_exp_%04d_%s" % (args.identifier, n, consts.exptime)
+            n = max([-1] + [int(d.split("_")[-3]) for d in dirs if temp_name in d]) + 1
+            self.exp_name = "%s_%04d_%s" % (temp_name, n, consts.exptime)
             self.load_model = False
-
             self.exp_num = n
 
         # init experiment parameters
@@ -86,14 +89,10 @@ class Experiment(object):
             # copy code to dir
             copy_tree(os.path.abspath("."), self.code_dir)
 
-            # write csv file of hyper-parameters
-            filename = os.path.join(self.root, "hyperparameters.csv")
-            with open(filename, 'w', newline='') as csvfile:
-                spamwriter = csv.writer(csvfile, delimiter=',',
-                                        quotechar='|', quoting=csv.QUOTE_MINIMAL)
-                spamwriter.writerow(self.exp_name)
-                for k, v in vars(args).items():
-                    spamwriter.writerow([k, str(v)])
+            # write args to file
+            filename = os.path.join(self.root, "args.txt")
+            with open(filename, 'w') as fp:
+                fp.write('\n'.join(sys.argv[1:]))
 
             with open(os.path.join(self.root, "logger"), "a") as fo:
                 fo.write("%s\n" % logger_file)
@@ -120,14 +119,12 @@ class Experiment(object):
 
         if args.algorithm == "rbi":
             return RBIAgent
-        elif args.algorithm == "rbi_rnn":
-            return RBIRNNAgent
         elif args.algorithm == "ape":
             return ApeAgent
-        elif args.algorithm == "ppo":
-            return PPOAgent
         elif args.algorithm == "r2d2":
             return R2D2Agent
+        elif args.algorithm == "rbi_rnn":
+            return RBIRNNAgent
         else:
             return NotImplementedError
 
@@ -252,14 +249,12 @@ class Experiment(object):
         agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint)
         multiplayer = agent.multiplay()
 
-        while True:
+        for _ in multiplayer:
 
             player = self.get_player(agent)
             if player:
-
-                agent.set_player(player['player'], behavioral_avg_score=player['high'], behavioral_avg_frame=player['frames'])
-
-            next(multiplayer)
+                agent.set_player(player['player'], behavioral_avg_score=player['high'],
+                                 behavioral_avg_frame=player['frames'])
 
     def play(self, params=None):
 
@@ -287,10 +282,12 @@ class Experiment(object):
         agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint, choose=True)
         agent.clean()
 
-    def choose(self):
+    def evaluate(self):
 
         uuid = "%012d" % np.random.randint(1e12)
         agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint, choose=True)
+
+        best_score = -np.inf
 
         tensorboard_path = os.path.join(self.results_dir, uuid)
         os.makedirs(tensorboard_path)
@@ -395,6 +392,11 @@ class Experiment(object):
                 player_params['frames'] = np.percentile(frames, 90)
                 player_params['high'] = np.percentile(scores, 90)
 
+                # save best player checkpoint
+                if player_name != "behavioral" and score.mean() > best_score:
+                    best_score = score.mean()
+                    agent.save_checkpoint(self.checkpoint_best, {'n': n, 'score': score})
+
                 if args.tensorboard:
 
                     self.writer.add_scalar('score/%s' % player_name, float(score.mean()), n)
@@ -417,6 +419,44 @@ class Experiment(object):
                     np.save(stat_filename, stats)
 
                 kk += 1
+
+            if agent.n_offset >= args.n_tot:
+                break
+
+        print("End of evaluation")
+
+    def postprocess(self):
+
+        run_dir = os.path.join(self.root, "scores")
+        save_dir = os.path.join(self.root, "postprocess")
+
+        if not os.path.isdir(save_dir):
+            os.mkdir(save_dir)
+        elif os.path.isfile(os.path.join(save_dir, "df_reroute")) and os.path.isfile(
+                os.path.join(save_dir, "df_behavioral")):
+            return
+
+        results_reroute = {'score': [], 'frame': [], 'n': [], 'time': []}
+        results_behavioral = {'score': [], 'frame': [], 'n': [], 'time': []}
+
+        for d in os.listdir(run_dir):
+            print(d)
+            for f in os.listdir(os.path.join(run_dir, d)):
+
+                if "behavioral" in f:
+                    for key in results_behavioral:
+                        item = np.load(os.path.join(run_dir, d, f)).item()
+                        results_behavioral[key] += item[key]
+                else:
+                    for key in results_reroute:
+                        item = np.load(os.path.join(run_dir, d, f)).item()
+                        results_reroute[key] += item[key]
+
+        df_reroute = pd.DataFrame(results_reroute)
+        df_behavioral = pd.DataFrame(results_behavioral)
+
+        df_reroute.to_pickle(os.path.join(save_dir, "df_reroute"))
+        df_behavioral.to_pickle(os.path.join(save_dir, "df_behavioral"))
 
     def print_actions_statistics(self, a_agent, a_player, n, Hbeta, Hpi, adv_a, q_a, r_mc):
 
@@ -547,7 +587,4 @@ class Experiment(object):
         player = agent.demonstrate(128)
 
         for i, step in enumerate(player):
-            # print("here %d" % i)
             yield step
-
-            # print("out")
