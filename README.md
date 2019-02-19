@@ -105,4 +105,35 @@ To run the docker container:
 nvidia-docker run --rm -it --net=host --ipc=host --name rbi1 local:rbi bash
 ```
 
+## Evaluation
 
+There are three ways to evaluate the learning progress and agent performance
+
+### Tensorboard
+
+Each run logs several evaluation metrics such as: 
+(1) loss function
+(2) network weights
+(3) score statistics (mean, std, min, max) 
+
+To view the tensorboar run an ssh port-forwarding command
+
+```bash
+ssh -L <port>:127.0.0.1:<port> <server>
+```
+and from the server terminal run
+```bash
+cd <outputdir>/results
+tensorboard --logdir:<name>:<run directory> --port<port>
+```
+
+### Jupyter Notebook
+
+To view a live agent run the evaluate.ipynb notebook.
+Use the identifier name and the resume parameter to choose the required run.
+You may also need to change the basedir parameter.
+
+### Pandas Dataframe
+
+Performance logs are stored to numpy files and in the end of the run a postprocessing process stores all logs into a pandas dataframe.
+These dataframes may be used to plot the performance graph with the plot_results.py script.
