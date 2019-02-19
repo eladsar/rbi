@@ -151,21 +151,15 @@ class RBIAgent(Agent):
             beta_log = F.log_softmax(beta, dim=1)
             beta = F.softmax(beta.detach(), dim=1)
 
-            _, _, _, q, q_a = self.value_net(s, a, self.pi_rand_batch)
+            _, _, _, _, q_a = self.value_net(s, a, self.pi_rand_batch)
             _, _, _, q_tag, _ = self.target_net(s_tag, a, self.pi_rand_batch)
 
-            # q = q.detach()
-            # v_eval = (q * pi).sum(dim=1)
             v_target = (q_tag * pi_tag).sum(dim=1).detach()
 
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(v_target))
 
             is_value = tde ** (-self.priority_beta)
             is_value = is_value / is_value.max()
-
-            # v_diff = (q * (beta - pi)).abs().sum(dim=1)
-            # is_policy = ((v_diff + 0.01) / (v_eval.abs() + 0.01) / tde) ** self.priority_alpha
-            # is_policy = is_policy / is_policy.max()
 
             is_policy = is_value
 
@@ -469,7 +463,7 @@ class RBIAgent(Agent):
                 episode[i].append(np.array((self.frame, a, pi[i],
                                             None, None,
                                             episode_num[i], 0., 0, 0,
-                                            0., 1., 1., 0, 1., 0), dtype=self.rec_type))
+                                            0., 1., 1., 0, 1., 0, 0., self.env.ram), dtype=self.rec_type))
 
                 env.step(a)
 
@@ -490,6 +484,7 @@ class RBIAgent(Agent):
                     td_val, t_val = get_tde_value(rewards[i], self.discount, self.n_steps)
                     tde = np.abs(np.array(q_a[i]) - get_td_value(rewards[i], v_target[i], self.discount, self.n_steps))
                     v_scale = np.concatenate(v_target[i])
+                    mc_val = get_mc_value(rewards[i], v_target[i], self.discount, self.n_steps)
 
                     tde = ((tde + 0.01) / (np.abs(v_scale) + 0.01)) ** self.priority_alpha
 
@@ -497,13 +492,17 @@ class RBIAgent(Agent):
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
                     episode_df['t'] = t_val[self.history_length - 1:self.max_length]
                     episode_df['tde'] = tde[self.history_length - 1:self.max_length]
+                    episode_df['R'] = mc_val[self.history_length - 1:self.max_length]
 
                     trajectory[i].append(episode_df)
 
                     print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
                           (self.frame, env.score, env.k, mp_explore[i],  np.sign(explore_threshold[i]), mp_trigger[i], time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
 
-                    env.reset()
+                    # roll out a state from the active learning buffer
+                    ram = None
+                    env.reset(ram)
+
                     episode[i] = []
                     q_a[i] = []
                     rewards[i] = [[]]

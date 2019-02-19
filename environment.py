@@ -35,7 +35,7 @@ class Env(object):
         self.lives = 0  # Life counter (used in DeepMind training)
         self.score = 0
         self.frame = None
-        self.s, self.r, self.t = None, None, None
+        self.s, self.r, self.t, self.ram = None, None, None, None
         self.aux = torch.zeros(1, 1)
         self.history_length = args.history_length
         self.buffer = [np.zeros((args.height, args.width), dtype=np.float32)] * self.history_length
@@ -51,7 +51,7 @@ class Env(object):
         self.image = None
         self.max_score = consts.max_score[args.game]
 
-    def reset(self):
+    def reset(self, ram=None):
         # Reset internal
         self.score = 0
         self.buffer = [np.zeros((args.height, args.width), dtype=np.float32)] * self.history_length
@@ -69,6 +69,10 @@ class Env(object):
         self.k = 0
         self.kk = 0
         self.t = 0
+
+        if ram is not None:
+            self.ale.restoreState(ram)
+        self.ram = self.ale.cloneState()
 
     def step(self, a):
 
@@ -118,3 +122,5 @@ class Env(object):
         self.aux = (1 if float(self.kk) > 90 else 0) * torch.ones(1, 1)
 
         self.score += self.r
+        self.ram = self.ale.cloneState()
+

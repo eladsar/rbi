@@ -45,20 +45,36 @@ ape_experiment_dict = {"breakout": "breakout_ape_exp_0003_20180811_202933",
                        "frostbite": "frostbite_ape_exp_0000_20180813_081751",
                        }
 
-reroute_mini_dict = {"mspacman": "mspacman_no_mix_exp_0000_20180828_163722",
-                       "qbert": "qbert_m_3p8_exp_0001_20180827_135148",
-                       "spaceinvaders": "spaceinvaders_no_is_exp_0002_20180805_215111",
-                       # "berzerk": "berzerk_v_scale_exp_0000_20180825_213327",
+# reroute_mini_dict = {"mspacman": "mspacman_no_mix_exp_0000_20180828_163722",
+#                        "qbert": "qbert_m_3p8_exp_0001_20180827_135148",
+#                        "spaceinvaders": "spaceinvaders_no_is_exp_0002_20180805_215111",
+#                        # "berzerk": "berzerk_v_scale_exp_0000_20180825_213327",
+#                        "icehockey": "icehockey_m_3p8_exp_0001_20180827_135203",
+#                        }
+#
+#
+#
+#
+# ape_mini_dict = {      "mspacman": "mspacman_ape_exp_0000_20180812_162120",
+#                        "qbert": "qbert_ape_exp_0002_20180810_103813",
+#                        "spaceinvaders": "spaceinvaders_ape_exp_0019_20180811_205801",
+#                        # "berzerk": "berzerk_ape_exp_0000_20180814_032425",
+#                        "icehockey": "icehockey_ape_exp_0000_20180811_064621",
+#                        }
+
+
+reroute_mini_dict = {"mspacman": "mspacman_uniform_is_exp_0000_20190213_195016",
+                       "qbert": "qbert_uniform_is_exp_0000_20190212_090734",
+                       "spaceinvaders": "spaceinvaders_rbi_uniform_exp_0000_20190215_075454",
                        "icehockey": "icehockey_m_3p8_exp_0001_20180827_135203",
                        }
 
 
 
 
-ape_mini_dict = {      "mspacman": "mspacman_ape_exp_0000_20180812_162120",
-                       "qbert": "qbert_ape_exp_0002_20180810_103813",
-                       "spaceinvaders": "spaceinvaders_ape_exp_0019_20180811_205801",
-                       # "berzerk": "berzerk_ape_exp_0000_20180814_032425",
+ape_mini_dict = {      "mspacman": "mspacman_ape_exp_0001_20190213_085338",
+                       "qbert": "qbert_ape_huber_exp_0001_20190211_222400",
+                       "spaceinvaders": "spaceinvaders_ape_exp_0000_20190215_002315",
                        "icehockey": "icehockey_ape_exp_0000_20180811_064621",
                        }
 
@@ -117,10 +133,9 @@ def convert_to_dataframe(experiment):
 
 def preprocess(df):
 
-    # idx = pd.RangeIndex(0, 3125000, 100)
-    idx = pd.RangeIndex(0, 3000000, 100)
+    idx = pd.RangeIndex(0, 3125000, 100)
 
-    df = df[df['n'] <= 3000000]
+    df = df[df['n'] <= 3125000]
 
     df = df.sort_values("n")
     df = df.groupby("n").mean()
@@ -133,10 +148,9 @@ def preprocess(df):
 
 def preprocess_quantiles(df):
 
-    # idx = pd.RangeIndex(0, 3125000, 100)
-    idx = pd.RangeIndex(0, 3000000, 100)
+    idx = pd.RangeIndex(0, 3125000, 100)
 
-    df = df[df['n'] <= 3000000]
+    df = df[df['n'] <= 3125000]
 
     df = df.sort_values("n")
     df = df.groupby("n").mean()
@@ -243,7 +257,7 @@ def plot_cumulative():
 def plot_mini_charts():
 
     plt.style.use('ggplot')
-    plt.figure(1, figsize=(9, 6))
+    plt.figure(1, figsize=(18, 3))
     plt.rc('ytick', labelsize=10)
     plt.rc('xtick', labelsize=10)
 
@@ -268,7 +282,8 @@ def plot_mini_charts():
 
         df_reroute = preprocess(df_reroute)
         df_ape = preprocess(df_ape)
-        plt.subplot(2, 2, i)
+        # plt.subplot(2, 2, i)
+        plt.subplot(1, 4, i)
 
         x1 = df_reroute.index
         y1 = df_reroute.score
@@ -291,7 +306,8 @@ def plot_mini_charts():
         ax.fill_between(x1, y1_u, y1_d, alpha=0.5)
         # plt.plot(x, std / y.abs(), label=experiment)
         plt.title(experiment, fontsize=14)
-        if i > 2:
+
+        if i > 0:
             plt.xticks([0, 1e6, 2e6, 3e6], ["0", "1M", "2M", "3M"])
             plt.xlabel("Minibatches (# of backward passes)")
         else:
@@ -584,8 +600,8 @@ def main():
     # for experiment in os.listdir(root_dir):
     #     convert_to_dataframe(experiment)
 
-    plot_charts()
-    # plot_mini_charts()
+    # plot_charts()
+    plot_mini_charts()
     # plot_time()
     # plot_cumulative()
     # ablation_test()
