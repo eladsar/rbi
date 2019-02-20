@@ -384,7 +384,8 @@ class ApeAgent(Agent):
                     tde = np.abs(np.array(q_a[i]) - get_td_value(rewards[i], v_target[i], self.discount, self.n_steps))
                     v_scale = np.concatenate(v_target[i])
 
-                    tde = ((tde + 0.01) / (np.abs(v_scale) + 0.01)) ** self.priority_alpha
+                    # tde = ((tde + 0.01) / (np.abs(v_scale) + 0.01)) ** self.priority_alpha
+                    tde = np.minimum(tde, tde / np.abs(v_scale)) ** self.priority_alpha
 
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
                     episode_df['r'] = td_val[self.history_length - 1:self.max_length]
