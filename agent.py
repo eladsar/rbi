@@ -167,4 +167,5 @@ class Agent(object):
                 except:
                     pass
 
+        time.sleep(600)
         shutil.rmtree(self.root_dir)
