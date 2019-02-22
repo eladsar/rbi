@@ -137,3 +137,17 @@ You may also need to change the basedir parameter.
 
 Performance logs are stored to numpy files and in the end of the run a postprocessing process stores all logs into a pandas dataframe.
 These dataframes may be used to plot the performance graph with the plot_results.py script.
+
+## Hardware requirements
+
+The minimal hardware requirements to replicate our results are:
+
+CPU:
+We use 2 x Intel(R) Xeon(R) CPU E5-2630 v4 @ 2.20GHz
+Which is equivalent to 48 virtual cores.
+
+GPU:
+4 x GeForce GTX 1080 Ti
+
+RAM:
+128GB DDR4 SDRAM
