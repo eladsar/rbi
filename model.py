@@ -7,25 +7,11 @@ import numpy as np
 action_space = len(np.nonzero(consts.actions[args.game])[0])
 
 
-class DuelNet(nn.Module):
+class AutoEncoder(nn.Module):
 
     def __init__(self):
 
-        super(DuelNet, self).__init__()
-
-        # value net
-        self.fc_v = nn.Sequential(
-            nn.Linear(3136, args.hidden_features),
-            nn.ReLU(),
-            nn.Linear(args.hidden_features, 1),
-        )
-
-        # advantage net
-        self.fc_adv = nn.Sequential(
-            nn.Linear(3136, args.hidden_features),
-            nn.ReLU(),
-            nn.Linear(args.hidden_features, action_space),
-        )
+        super(AutoEncoder, self).__init__()
 
         # batch normalization and dropout
         self.cnn = nn.Sequential(
@@ -46,11 +32,41 @@ class DuelNet(nn.Module):
         for weight in self.parameters():
             nn.init.xavier_uniform(weight.data)
 
-    def forward(self, s, a, beta):
+    def forward(self, s):
 
         # state CNN
         s = self.cnn(s)
         s = s.view(s.size(0), -1)
+
+        return s
+
+
+
+class DuelNet(nn.Module):
+
+    def __init__(self):
+
+        super(DuelNet, self).__init__()
+
+        # value net
+        self.fc_v = nn.Sequential(
+            nn.Linear(args.hidden_features, args.hidden_features),
+            nn.ReLU(),
+            nn.Linear(args.hidden_features, 1),
+        )
+
+        # advantage net
+        self.fc_adv = nn.Sequential(
+            nn.Linear(args.hidden_features, args.hidden_features),
+            nn.ReLU(),
+            nn.Linear(args.hidden_features, action_space),
+        )
+
+    def reset(self):
+        for weight in self.parameters():
+            nn.init.xavier_uniform(weight.data)
+
+    def forward(self, s, a, beta):
 
         v = self.fc_v(s)
         adv_tilde = self.fc_adv(s)
@@ -72,27 +88,12 @@ class BehavioralNet(nn.Module):
 
         super(BehavioralNet, self).__init__()
 
-        # batch normalization and dropout
-        self.cnn = nn.Sequential(
-            nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-        )
-
         # advantage net
         self.fc_beta = nn.Sequential(
-            nn.Linear(3136, args.hidden_features),
+            nn.Linear(args.hidden_features, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, action_space),
         )
-
-        # initialization
-        self.cnn[0].bias.data.zero_()
-        self.cnn[2].bias.data.zero_()
-        self.cnn[4].bias.data.zero_()
 
     def reset(self):
         for weight in self.parameters():
@@ -100,10 +101,6 @@ class BehavioralNet(nn.Module):
 
     def forward(self, s):
 
-        # state CNN
-
-        s = self.cnn(s)
-        s = s.view(s.size(0), -1)
         beta = self.fc_beta(s)
 
         return beta
