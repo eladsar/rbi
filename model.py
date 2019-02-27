@@ -7,11 +7,28 @@ import numpy as np
 action_space = len(np.nonzero(consts.actions[args.game])[0])
 
 
+class VarLayer(nn.Module):
+
+    def __init__(self, size):
+        super(VarLayer, self).__init__()
+        self.generator = torch.distributions.normal.Normal(torch.zeros(size), torch.ones(size))
+
+    def forward(self, batch, mean, logvar):
+
+        if self.training:
+            return mean + self.generator.sample((batch,)) * torch.exp(0.5 * logvar)
+        return mean
+
+
 class AutoEncoder(nn.Module):
 
     def __init__(self):
 
         super(AutoEncoder, self).__init__()
+
+        self.mean = nn.Linear(3136, args.hidden_features)
+        self.std = nn.Linear(3136, args.hidden_features)
+        self.var_layer = VarLayer(args.hidden_features)
 
         # batch normalization and dropout
         self.cnn = nn.Sequential(
@@ -28,6 +45,21 @@ class AutoEncoder(nn.Module):
         self.cnn[2].bias.data.zero_()
         self.cnn[4].bias.data.zero_()
 
+        self.dconv = nn.Sequential(
+            nn.Linear(args.hidden_features, 3136),
+            nn.ReLU(),
+            nn.ConvTranspose2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.ConvTranspose2d(32, args.history_length, kernel_size=8, stride=4),
+        )
+
+        # initialization
+        self.dcnn[2].bias.data.zero_()
+        self.dcnn[4].bias.data.zero_()
+        self.dcnn[6].bias.data.zero_()
+
     def reset(self):
         for weight in self.parameters():
             nn.init.xavier_uniform(weight.data)
@@ -35,11 +67,18 @@ class AutoEncoder(nn.Module):
     def forward(self, s):
 
         # state CNN
+        batch = s.size(0)
         s = self.cnn(s)
-        s = s.view(s.size(0), -1)
+        s = s.view(batch, -1)
 
-        return s
+        mean = self.mean(s)
+        logvar = self.logvar(s)
 
+        s = self.var_layer(batch, mean, logvar)
+        s = s.view(s.size(0), 64, 7, 7)
+        s = self.cnn(s)
+
+        return s, mean, torch.exp(0.5 * logvar)
 
 
 class DuelNet(nn.Module):
