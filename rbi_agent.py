@@ -9,7 +9,7 @@ import torch.nn as nn
 
 from config import consts, args
 import psutil
-from model import BehavioralNet, DuelNet
+from model import BehavioralNet, DuelNet, AutoEncoder
 
 from memory import ReplayBatchSampler, Memory, collate
 from agent import Agent
@@ -34,15 +34,19 @@ class RBIAgent(Agent):
         self.beta_net = BehavioralNet()
         self.value_net = DuelNet()
         self.target_net = DuelNet()
+        self.vae = AutoEncoder()
 
         if torch.cuda.device_count() > 1:
             self.beta_net = nn.DataParallel(self.beta_net)
             self.value_net = nn.DataParallel(self.value_net)
             self.target_net = nn.DataParallel(self.target_net)
+            self.vae = nn.DataParallel(self.vae)
 
         self.beta_net.to(self.device)
         self.value_net.to(self.device)
         self.target_net.to(self.device)
+        self.vae.to(self.device)
+
         self.target_net.load_state_dict(self.value_net.state_dict())
 
         self.pi_rand = np.ones(self.action_space) / self.action_space
@@ -78,6 +82,7 @@ class RBIAgent(Agent):
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
         self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
         self.optimizer_beta = torch.optim.Adam(self.beta_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
+        self.optimizer_vae = torch.optim.Adam(self.vae.parameters(), lr=0.00025 / 4, eps=1.5e-4, weight_decay=0)
         self.n_offset = 0
 
     def save_checkpoint(self, path, aux=None):
@@ -86,15 +91,19 @@ class RBIAgent(Agent):
             state = {'beta_net': self.beta_net.module.state_dict(),
                      'value_net': self.value_net.module.state_dict(),
                      'target_net': self.target_net.module.state_dict(),
+                     'vae': self.vae.module.state_dict(),
                      'optimizer_value': self.optimizer_value.state_dict(),
                      'optimizer_beta': self.optimizer_beta.state_dict(),
+                     'optimizer_vae': self.optimizer_vae.state_dict(),
                      'aux': aux}
         else:
             state = {'beta_net': self.beta_net.state_dict(),
                      'value_net': self.value_net.state_dict(),
                      'target_net': self.target_net.state_dict(),
+                     'vae': self.vae.state_dict(),
                      'optimizer_value': self.optimizer_value.state_dict(),
                      'optimizer_beta': self.optimizer_beta.state_dict(),
+                     'optimizer_vae': self.optimizer_vae.state_dict(),
                      'aux': aux}
 
         torch.save(state, path)
@@ -107,12 +116,15 @@ class RBIAgent(Agent):
             self.beta_net.module.load_state_dict(state['beta_net'])
             self.value_net.module.load_state_dict(state['value_net'])
             self.target_net.module.load_state_dict(state['target_net'])
+            self.vae.module.load_state_dict(state['vae'])
         else:
             self.beta_net.load_state_dict(state['beta_net'])
             self.value_net.load_state_dict(state['value_net'])
             self.target_net.load_state_dict(state['target_net'])
+            self.vae.load_state_dict(state['vae'])
 
         self.optimizer_beta.load_state_dict(state['optimizer_beta'])
+        self.optimizer_vae.load_state_dict(state['optimizer_vae'])
         self.optimizer_value.load_state_dict(state['optimizer_value'])
         self.n_offset = state['aux']['n']
 
@@ -137,8 +149,8 @@ class RBIAgent(Agent):
 
             n = self.n_offset + n + 1
 
-            s = sample['s'].to(self.device)
-            s_tag = sample['s_tag'].to(self.device)
+            o = sample['s'].to(self.device)
+            o_tag = sample['s_tag'].to(self.device)
             a = sample['a'].to(self.device).unsqueeze_(1)
             r = sample['r'].to(self.device)
             t = sample['t'].to(self.device)
@@ -146,6 +158,11 @@ class RBIAgent(Agent):
             pi_tag = sample['pi_tag'].to(self.device)
             tde = sample['tde'].to(self.device)
 
+            o_tag_hat, mean, logvar = self.vae(o)
+            _, s_tag, _ = self.vae(o_tag)
+
+            s_tag = s_tag.detach()
+            s = mean.detach()
             # Behavioral nets
             beta = self.beta_net(s)
             beta_log = F.log_softmax(beta, dim=1)
@@ -172,6 +189,8 @@ class RBIAgent(Agent):
             loss_value = (self.q_loss(q_a, r) * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
 
+            loss_vae = 0.5 * (mean**2 + torch.exp(logvar) - logvar).mean() + ((o_tag - o_tag_hat) ** 2).sum(dim=1).mean()
+
             # Learning part
 
             self.optimizer_beta.zero_grad()
@@ -181,6 +200,10 @@ class RBIAgent(Agent):
             self.optimizer_value.zero_grad()
             loss_value.backward()
             self.optimizer_value.step()
+
+            self.optimizer_vae.zero_grad()
+            loss_vae.backward()
+            self.optimizer_vae.step()
 
             # collect actions statistics
             if not n % 50:
