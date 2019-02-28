@@ -139,6 +139,7 @@ class RBIAgent(Agent):
 
         self.beta_net.train()
         self.value_net.train()
+        self.vae.train()
         self.target_net.eval()
 
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
@@ -259,7 +260,7 @@ class RBIAgent(Agent):
                     results['q_a'] = np.concatenate(results['q_a'])
                     results['a_player'] = np.concatenate(results['a_player'])
                     results['mc_val'] = np.concatenate(results['mc_val'])
-                    results['image'] = s[0, :-1, :, :].data.cpu()
+                    results['image'] = o_tag_hat[0, :-1, :, :].data.cpu()
 
                     yield results
                     self.beta_net.train()
@@ -438,8 +439,12 @@ class RBIAgent(Agent):
 
                 self.beta_net.eval()
                 self.value_net.eval()
+                self.vae.eval()
 
-            s = torch.cat([env.s for env in mp_env]).to(self.device)
+            o = torch.cat([env.s for env in mp_env]).to(self.device)
+
+            _, s, _ = self.vae(o)
+            s = s.detach()
 
             beta = self.beta_net(s)
             beta = F.softmax(beta.detach(), dim=1)
