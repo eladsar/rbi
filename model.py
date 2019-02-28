@@ -11,12 +11,14 @@ class VarLayer(nn.Module):
 
     def __init__(self, size):
         super(VarLayer, self).__init__()
-        self.generator = torch.distributions.normal.Normal(torch.zeros(size), torch.ones(size))
+        # self.generator = torch.distributions.normal.Normal(torch.zeros(size), torch.ones(size))
+        self.size = size
 
     def forward(self, batch, mean, logvar):
 
         if self.training:
-            return mean + self.generator.sample((batch,)) * torch.exp(0.5 * logvar)
+            return mean + torch.cuda.FloatTensor(batch, self.size).normal_() * torch.exp(0.5 * logvar)
+            # return mean + self.generator.sample((batch,)) * torch.exp(0.5 * logvar)
         return mean
 
 
@@ -27,7 +29,7 @@ class AutoEncoder(nn.Module):
         super(AutoEncoder, self).__init__()
 
         self.mean = nn.Linear(3136, args.hidden_features)
-        self.std = nn.Linear(3136, args.hidden_features)
+        self.logvar = nn.Linear(3136, args.hidden_features)
         self.var_layer = VarLayer(args.hidden_features)
 
         # batch normalization and dropout
@@ -45,9 +47,12 @@ class AutoEncoder(nn.Module):
         self.cnn[2].bias.data.zero_()
         self.cnn[4].bias.data.zero_()
 
-        self.dconv = nn.Sequential(
+        self.dlin = nn.Sequential(
             nn.Linear(args.hidden_features, 3136),
             nn.ReLU(),
+        )
+
+        self.dconv = nn.Sequential(
             nn.ConvTranspose2d(64, 64, kernel_size=3, stride=1),
             nn.ReLU(),
             nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2),
@@ -56,9 +61,9 @@ class AutoEncoder(nn.Module):
         )
 
         # initialization
-        self.dcnn[2].bias.data.zero_()
-        self.dcnn[4].bias.data.zero_()
-        self.dcnn[6].bias.data.zero_()
+        self.dconv[0].bias.data.zero_()
+        self.dconv[2].bias.data.zero_()
+        self.dconv[4].bias.data.zero_()
 
     def reset(self):
         for weight in self.parameters():
@@ -75,10 +80,11 @@ class AutoEncoder(nn.Module):
         logvar = self.logvar(s)
 
         s = self.var_layer(batch, mean, logvar)
-        s = s.view(s.size(0), 64, 7, 7)
-        s = self.cnn(s)
+        s = self.dlin(s)
+        s = s.view(batch, 64, 7, 7)
+        s = self.dconv(s)
 
-        return s, mean, torch.exp(0.5 * logvar)
+        return s, mean, logvar
 
 
 class DuelNet(nn.Module):
