@@ -133,6 +133,8 @@ To view a live agent run the evaluate.ipynb notebook.
 Use the identifier name and the resume parameter to choose the required run.
 You may also need to change the basedir parameter.
 
+[![A visualization of a Qbert RBI agent](https://img.youtube.com/vi/pWHybdalu1g/0.jpg)](https://www.youtube.com/watch?v=pWHybdalu1g)
+
 ### Pandas Dataframe
 
 Performance logs are stored to numpy files and in the end of the run a postprocessing process stores all logs into a pandas dataframe.
