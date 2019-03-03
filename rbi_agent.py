@@ -159,8 +159,9 @@ class RBIAgent(Agent):
             pi_tag = sample['pi_tag'].to(self.device)
             tde = sample['tde'].to(self.device)
 
-            o_tag_hat, mean, logvar = self.vae(o)
-            _, s_tag, _ = self.vae(o_tag)
+            o_hat, mean, logvar = self.vae(o, a)
+            # o_tag_hat, mean, logvar = self.vae(o, a)
+            _, s_tag, _ = self.vae(o_tag, a)
 
             s_tag = s_tag.detach()
             s = mean.detach()
@@ -181,8 +182,6 @@ class RBIAgent(Agent):
             is_value = tde ** (-self.priority_beta)
             is_value = is_value / is_value.max()
 
-            # is_policy = is_value
-
             v_diff = (q * (beta - pi)).abs().sum(dim=1)
             is_policy = (torch.min(v_diff, v_diff/v_eval) / tde) ** self.priority_alpha
             is_policy = is_policy / is_policy.max()
@@ -190,7 +189,10 @@ class RBIAgent(Agent):
             loss_value = (self.q_loss(q_a, r) * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
 
-            loss_vae = 0.5 * (mean**2 + torch.exp(logvar) - logvar).mean() + ((o_tag - o_tag_hat) ** 2).sum(dim=1).mean()
+            loss_vae = 0.5 * (mean**2 + torch.exp(logvar) - logvar).mean() + ((o - o_hat) ** 2).sum(dim=1).mean()
+            imag = o_hat
+            # loss_vae = 0.5 * (mean ** 2 + torch.exp(logvar) - logvar).mean() + ((o - o_tag_hat) ** 2).sum(dim=1).mean()
+            # imag = o_tag_hat
 
             # Learning part
 
@@ -260,7 +262,7 @@ class RBIAgent(Agent):
                     results['q_a'] = np.concatenate(results['q_a'])
                     results['a_player'] = np.concatenate(results['a_player'])
                     results['mc_val'] = np.concatenate(results['mc_val'])
-                    results['image'] = o_tag_hat[0, :-1, :, :].data.cpu()
+                    results['image'] = imag[0, :-1, :, :].data.cpu()
 
                     yield results
                     self.beta_net.train()
@@ -443,7 +445,7 @@ class RBIAgent(Agent):
 
             o = torch.cat([env.s for env in mp_env]).to(self.device)
 
-            _, s, _ = self.vae(o)
+            _, s, _ = self.vae(o, a_zeros_mp)
             s = s.detach()
 
             beta = self.beta_net(s)

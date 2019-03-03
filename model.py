@@ -48,6 +48,7 @@ class AutoEncoder(nn.Module):
         self.cnn[4].bias.data.zero_()
 
         self.dlin = nn.Sequential(
+            # nn.Linear(args.hidden_features+1, 3136),
             nn.Linear(args.hidden_features, 3136),
             nn.ReLU(),
         )
@@ -69,7 +70,7 @@ class AutoEncoder(nn.Module):
         for weight in self.parameters():
             nn.init.xavier_uniform(weight.data)
 
-    def forward(self, s):
+    def forward(self, s, a):
 
         # state CNN
         batch = s.size(0)
@@ -80,6 +81,7 @@ class AutoEncoder(nn.Module):
         logvar = self.logvar(s)
 
         s = self.var_layer(batch, mean, logvar)
+        # s = torch.cat((s, a.float()), 1)
         s = self.dlin(s)
         s = s.view(batch, 64, 7, 7)
         s = self.dconv(s)
