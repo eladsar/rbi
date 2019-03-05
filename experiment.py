@@ -78,7 +78,7 @@ class Experiment(object):
             with open("logger", "a") as fo:
                 fo.write("%s resume\n" % logger_file)
         else:
-            logger.info("Creating new experiment")
+            logger.info("Creating new experiment. NUMBER: {}".format(self.exp_num))
             os.makedirs(self.root)
             os.makedirs(self.tensorboard_dir)
             os.makedirs(self.checkpoints_dir)

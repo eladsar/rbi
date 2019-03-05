@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import argparse
 import time
 import numpy as np
@@ -132,6 +133,8 @@ class Consts(object):
 
     mem_threshold = int(5e9)
 
+    ram_size = 128 + (128*8)
+
     action_meanings = ['NOOP', 'FIRE', 'UP', 'RIGHT', 'LEFT', 'DOWN',
                        'UPRIGHT', 'UPLEFT', 'DOWNRIGHT', 'DOWNLEFT', 'UPFIRE',
                        'RIGHTFIRE', 'LEFTFIRE', 'DOWNFIRE', 'UPRIGHTFIRE',
@@ -222,7 +225,7 @@ class Consts(object):
                              ('h_beta', np.float32, args.hidden_features_rnn), ('h_q', np.float32, args.hidden_features_rnn),
                              ('ep', np.int), ('t', np.float32), ('fr_s', np.int), ('fr_e', np.int),
                              ('r', np.float32), ('rho_v', np.float32), ('rho_q', np.float32), ('traj', np.int),
-                             ('tde', np.float32), ('aux', np.float32), ('R', np.float32), ('ram', np.int128)])
+                             ('tde', np.float32), ('aux', np.float32), ('R', np.float32), ('ram', np.uint8, ram_size)])
 
     outdir = os.path.join(args.base_dir, 'results')
     logdir = os.path.join(args.base_dir, 'logs')

@@ -35,7 +35,8 @@ class Env(object):
         self.lives = 0  # Life counter (used in DeepMind training)
         self.score = 0
         self.frame = None
-        self.s, self.r, self.t, self.ram = None, None, None, None
+        self.s, self.r, self.t, self.game_state = None, None, None, None
+        self.set_ram()
         self.aux = torch.zeros(1, 1)
         self.history_length = args.history_length
         self.buffer = [np.zeros((args.height, args.width), dtype=np.float32)] * self.history_length
@@ -51,7 +52,7 @@ class Env(object):
         self.image = None
         self.max_score = consts.max_score[args.game]
 
-    def reset(self, ram=None):
+    def reset(self, game_state=None):
         # Reset internal
         self.score = 0
         self.buffer = [np.zeros((args.height, args.width), dtype=np.float32)] * self.history_length
@@ -70,9 +71,9 @@ class Env(object):
         self.kk = 0
         self.t = 0
 
-        if ram is not None:
-            self.ale.restoreState(ram)
-        self.ram = self.ale.cloneState()
+        if game_state is not None:
+            self.ale.restoreState(game_state)
+        self.game_state = self.ale.cloneState()
 
     def step(self, a):
 
@@ -87,8 +88,9 @@ class Env(object):
         o.append(self.ale.getScreenGrayscale())
         self.r += self.ale.act(a)
         o.append(self.ale.getScreenGrayscale())
-        t = self.ale.game_over()
 
+        t = self.ale.game_over()
+        
         # self.r = self.ale.act(a)
         # # get gray scale image
         # self.image = self.ale.getScreenGrayscale()
@@ -99,6 +101,8 @@ class Env(object):
 
         self.image = np.maximum(o[0], o[1])
         self.frame = cv2.resize(self.image.astype(np.float32), (img_width, img_height), interpolation=interpolation) / 256.
+        self.set_ram(self.ale.getRAM())  # 128
+
 
         self.k += 1
 
@@ -122,5 +126,12 @@ class Env(object):
         self.aux = (1 if float(self.kk) > 90 else 0) * torch.ones(1, 1)
 
         self.score += self.r
-        self.ram = self.ale.cloneState()
+        self.game_state = self.ale.cloneState()
 
+    def set_ram(self,ram=None):
+        if ram is None:
+            ram = np.zeros(128, dtype=np.uint8)
+        b_mask = [num & mask for num in ram for mask in [0b00000001,0b00000010,0b00000100,0b00001000,
+                                                         0b00010000,0b00100000,0b01000000,0b10000000,
+                                                         0b11111111]]
+        self.ram = np.array(b_mask, dtype=np.uint8)

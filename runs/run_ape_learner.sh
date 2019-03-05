@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-
 identifier=$1
 game=$2
 resume=$3
 aux="${@:4}"
-
+#aux="--algorithm=ape --n-steps=3 --no-reward-shape --no-dropout --no-infinite-horizon --batch=128 --hidden-features=512 --clip=1 --discount=0.99 --termination-reward=-1 --friction-reward=0 --priority-alpha=0.5 --priority-beta=0.5 --epsilon-a=0.001 --epsilon-pre=0.00164 --epsilon-post=0.00164 --cpu-workers=24 --update-target-interval=2500 --n-tot=3125000 --checkpoint-interval=5000 --random-initialization=2500 --player-replay-size=2500 --update-memory-interval=100 --load-memory-interval=250 --replay-updates-interval=5000 --replay-memory-size=2000000"
 loc=`dirname "%0"`
-
 if [ $resume != "new" ]; then
     resume="--resume=$3 --load-last-model"
     resume2="--resume=$3 --load-last-model"
@@ -25,29 +23,28 @@ args="--n-steps=3 --no-reward-shape --no-dropout --no-infinite-horizon \
 --random-initialization=2500 --player-replay-size=2500 --update-memory-interval=100 \
 --load-memory-interval=100 --replay-updates-interval=2500 --replay-memory-size=2000000 --n-actors=16"
 
-CUDA_VISIBLE_DEVICES=0, python $loc/main.py --learn --identifier=$identifier --game=$game $resume $args $aux --algorithm=ape
+CUDA_VISIBLE_DEVICES=0, python3.6 $loc/../main.py --learn --identifier=$identifier --game=$game $resume $args $aux --algorithm=ape
 
 if [ $? -ne 0 ]; then
-    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
+    CUDA_VISIBLE_DEVICES=0, python3.6 $loc/../main.py --play $resume2 $args \
                         --identifier=$identifier --game=$game $aux \
                         --algorithm=ape --play-episodes-interval=20 --max-frame=108000 &
-    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
+    CUDA_VISIBLE_DEVICES=0, python3.6 $loc/../main.py --play $resume2 $args \
                             --identifier=$identifier --game=$game $aux \
                             --algorithm=ape --play-episodes-interval=20 --max-frame=108000 &
-    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
+    CUDA_VISIBLE_DEVICES=0, python3.6 $loc/../main.py --play $resume2 $args \
                             --identifier=$identifier --game=$game $aux \
                             --algorithm=ape --play-episodes-interval=20 --max-frame=108000 &
-    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
+    CUDA_VISIBLE_DEVICES=0, python3.6 $loc/../main.py --play $resume2 $args \
                             --identifier=$identifier --game=$game $aux \
                             --algorithm=ape --play-episodes-interval=20 --max-frame=108000 &
-    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
+    CUDA_VISIBLE_DEVICES=0, python3.6 $loc/../main.py --play $resume2 $args \
                             --identifier=$identifier --game=$game $aux \
                             --algorithm=ape --play-episodes-interval=20 --max-frame=108000 &
-    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --play $resume2 $args \
+    CUDA_VISIBLE_DEVICES=0, python3.6 $loc/../main.py --play $resume2 $args \
                             --identifier=$identifier --game=$game $aux \
                             --algorithm=ape --play-episodes-interval=20 --max-frame=108000 &
 
-    CUDA_VISIBLE_DEVICES=0, python $loc/main.py --postprocess $resume2 $args \
+    CUDA_VISIBLE_DEVICES=0, python3.6 $loc/../main.py --postprocess $resume2 $args \
                             --identifier=$identifier --game=$game $aux --algorithm=ape &
 fi
-

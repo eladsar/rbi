@@ -41,7 +41,8 @@ class Memory(torch.utils.data.Dataset):
                 'a': torch.from_numpy(np.array(sample['a'])), 't': torch.from_numpy(np.array(sample['t'])),
                 'pi': torch.from_numpy(sample['pi']),
                 's_tag': torch.from_numpy(s_tag), 'pi_tag': torch.from_numpy(next_sample['pi']),
-                'tde': torch.from_numpy(np.array(sample['tde']))}
+                'tde': torch.from_numpy(np.array(sample['tde'])),
+                'ram': torch.FloatTensor(sample['ram'])}
 
     def preprocess_history(self, episode_dir, frame):
 
@@ -131,4 +132,5 @@ def collate(batch):
             't': torch.stack([sample['t'] for sample in batch]),
             'pi': torch.stack([sample['pi'] for sample in batch]),
             'pi_tag': torch.stack([sample['pi_tag'] for sample in batch]),
-            'tde': torch.stack([sample['tde'] for sample in batch])}
+            'tde': torch.stack([sample['tde'] for sample in batch]),
+            'ram': torch.stack([torch.FloatTensor(sample['ram']) for sample in batch])}

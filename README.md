@@ -64,6 +64,7 @@ ssh-copy-id -i ~/.ssh/id_rsa user@host
 #### Install Anaconda:
 copy anaconda file to server and run:
 sh Anaconda3-2018.12-Linux-x86_64.sh
+conda env create -f environment.yml
 
 #### Install Tmux:
 make new directory called tmux_tmp
@@ -80,7 +81,7 @@ mkdir -p ~/projects
 cd ~/projects
 git clone https://github.com/eladsar/rbi.git
 cd ~/projects/rbi
-conda env create -f install/environment.yml
+
 source activate torch1
 pip install atari-py
 ```
@@ -123,7 +124,7 @@ ssh -L <port>:127.0.0.1:<port> <server>
 ```
 and from the server terminal run
 ```bash
-cd <outputdir>/results
+cd ~/data/rbi/results
 tensorboard --logdir:<name>:<run directory> --port<port>
 ```
 

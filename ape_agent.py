@@ -8,7 +8,7 @@ from tqdm import tqdm
 import psutil
 
 from config import consts, args
-from model import DuelNet
+from model import DuelNet,DuelNetForRam
 
 from memory import ReplayBatchSampler, Memory, collate
 from agent import Agent
@@ -30,8 +30,8 @@ class ApeAgent(Agent):
         print("Learning with Ape Agent")
         super(ApeAgent, self).__init__(root_dir, checkpoint, player)
 
-        self.value_net = DuelNet()
-        self.target_net = DuelNet()
+        self.value_net = DuelNetForRam()
+        self.target_net = DuelNetForRam()
 
         if torch.cuda.device_count() > 1:
             self.value_net = nn.DataParallel(self.value_net)
@@ -122,16 +122,17 @@ class ApeAgent(Agent):
             a = sample['a'].to(self.device).unsqueeze_(1)
             r = sample['r'].to(self.device)
             t = sample['t'].to(self.device)
+            ram = sample['ram'].to(self.device)
             s_tag = sample['s_tag'].to(self.device)
             tde = sample['tde'].to(self.device)
 
-            _, _, _, q_tag_eval, _ = self.value_net(s_tag, a, self.pi_rand_batch)
+            _, _, _, q_tag_eval, _ = self.value_net(s_tag, ram, a, self.pi_rand_batch)
             q_tag_eval = q_tag_eval.detach()
 
-            _, _, _, q_tag_target, _ = self.target_net(s_tag, a, self.pi_rand_batch)
+            _, _, _, q_tag_target, _ = self.target_net(s_tag, ram, a, self.pi_rand_batch)
             q_tag_target = q_tag_target.detach()
 
-            _, _, _, q, q_a = self.value_net(s, a, self.pi_rand_batch)
+            _, _, _, q, q_a = self.value_net(s, ram, a, self.pi_rand_batch)
 
             a_tag = torch.argmax(q_tag_eval, dim=1).unsqueeze(1)
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(q_tag_target.gather(1, a_tag).squeeze(1)))
@@ -233,8 +234,9 @@ class ApeAgent(Agent):
                     self.value_net.eval()
 
                 s = self.env.s.to(self.device)
+                ram = torch.FloatTensor(self.env.ram).to(self.device)
                 # get aux data
-                _, _, _, q, _ = self.value_net(s, self.a_zeros, pi_rand)
+                _, _, _, q, _ = self.value_net(s, ram, self.a_zeros, pi_rand)
 
                 q = q.squeeze(0).data.cpu().numpy()
 
@@ -331,8 +333,9 @@ class ApeAgent(Agent):
                 self.value_net.eval()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
+            ram = torch.stack([torch.FloatTensor(env.ram.copy()) for env in mp_env]).to(self.device)
 
-            _, _, _, q, _ = self.value_net(s, a_zeros_mp, pi_rand_batch)
+            _, _, _, q, _ = self.value_net(s, ram, a_zeros_mp, pi_rand_batch)
 
             q = q.data.cpu().numpy()
 
@@ -365,7 +368,7 @@ class ApeAgent(Agent):
                 episode[i].append(np.array((self.frame, a, pi[i],
                                             None, None,
                                             episode_num[i], 0., 0, 0,
-                                            0., 1., 1., 0, 1., 0), dtype=self.rec_type))
+                                                0., 1., 1., 0, 1., 0, 0., env.ram.copy()), dtype=self.rec_type))
 
                 env.step(a)
 
@@ -467,7 +470,8 @@ class ApeAgent(Agent):
             while not self.env.t:
 
                 s = self.env.s.to(self.device)
-                _, _, _, q, _ = self.value_net(s, self.a_zeros, pi_rand)
+                ram = torch.FloatTensor(self.env.ram).to(self.device)
+                _, _, _, q, _ = self.value_net(s, ram, self.a_zeros, pi_rand)
 
                 q = q.squeeze(0).data.cpu().numpy()
 
