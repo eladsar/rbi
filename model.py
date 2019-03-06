@@ -22,11 +22,11 @@ class VarLayer(nn.Module):
         return mean
 
 
-class AutoEncoder(nn.Module):
+class Encoder(nn.Module):
 
     def __init__(self):
 
-        super(AutoEncoder, self).__init__()
+        super(Encoder, self).__init__()
 
         self.mean = nn.Linear(3136, args.hidden_features)
         self.logvar = nn.Linear(3136, args.hidden_features)
@@ -47,20 +47,6 @@ class AutoEncoder(nn.Module):
         self.cnn[2].bias.data.zero_()
         self.cnn[4].bias.data.zero_()
 
-        self.dlin = nn.Sequential(
-            # nn.Linear(args.hidden_features+1, 3136),
-            nn.Linear(args.hidden_features, 3136),
-            nn.ReLU(),
-        )
-
-        self.dconv = nn.Sequential(
-            nn.ConvTranspose2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.ConvTranspose2d(32, args.history_length, kernel_size=8, stride=4),
-        )
-
         # initialization
         self.dconv[0].bias.data.zero_()
         self.dconv[2].bias.data.zero_()
@@ -80,13 +66,9 @@ class AutoEncoder(nn.Module):
         mean = self.mean(s)
         logvar = self.logvar(s)
 
-        s = self.var_layer(batch, mean, logvar)
-        # s = torch.cat((s, a.float()), 1)
-        s = self.dlin(s)
-        s = s.view(batch, 64, 7, 7)
-        s = self.dconv(s)
+        z = self.var_layer(batch, mean, logvar)
 
-        return s, mean, logvar
+        return z, mean, logvar
 
 
 class DuelNet(nn.Module):
