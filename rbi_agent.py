@@ -18,6 +18,7 @@ from preprocess import get_tde_value, get_mc_value, h_torch, hinv_torch, release
 import cv2
 import os
 import time
+import itertools
 
 imcompress = cv2.IMWRITE_PNG_COMPRESSION
 compress_level = 2
@@ -80,9 +81,9 @@ class RBIAgent(Agent):
         # configure learning
 
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
-        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
+        self.optimizer_value = torch.optim.Adam(itertools.chain(self.value_net.parameters(), self.vae.parameters()),
+                                                lr=0.00025/4, eps=1.5e-4, weight_decay=0)
         self.optimizer_beta = torch.optim.Adam(self.beta_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
-        self.optimizer_vae = torch.optim.Adam(self.vae.parameters(), lr=0.00025 / 4, eps=1.5e-4, weight_decay=0)
         self.n_offset = 0
 
     def save_checkpoint(self, path, aux=None):
@@ -94,7 +95,6 @@ class RBIAgent(Agent):
                      'vae': self.vae.module.state_dict(),
                      'optimizer_value': self.optimizer_value.state_dict(),
                      'optimizer_beta': self.optimizer_beta.state_dict(),
-                     'optimizer_vae': self.optimizer_vae.state_dict(),
                      'aux': aux}
         else:
             state = {'beta_net': self.beta_net.state_dict(),
@@ -103,7 +103,6 @@ class RBIAgent(Agent):
                      'vae': self.vae.state_dict(),
                      'optimizer_value': self.optimizer_value.state_dict(),
                      'optimizer_beta': self.optimizer_beta.state_dict(),
-                     'optimizer_vae': self.optimizer_vae.state_dict(),
                      'aux': aux}
 
         torch.save(state, path)
@@ -124,7 +123,6 @@ class RBIAgent(Agent):
             self.vae.load_state_dict(state['vae'])
 
         self.optimizer_beta.load_state_dict(state['optimizer_beta'])
-        self.optimizer_vae.load_state_dict(state['optimizer_vae'])
         self.optimizer_value.load_state_dict(state['optimizer_value'])
         self.n_offset = state['aux']['n']
 
@@ -150,8 +148,8 @@ class RBIAgent(Agent):
 
             n = self.n_offset + n + 1
 
-            o = sample['s'].to(self.device)
-            o_tag = sample['s_tag'].to(self.device)
+            s = sample['s'].to(self.device)
+            s_tag = sample['s_tag'].to(self.device)
             a = sample['a'].to(self.device).unsqueeze_(1)
             r = sample['r'].to(self.device)
             t = sample['t'].to(self.device)
@@ -159,19 +157,19 @@ class RBIAgent(Agent):
             pi_tag = sample['pi_tag'].to(self.device)
             tde = sample['tde'].to(self.device)
 
-            o_hat, mean, logvar = self.vae(o, a)
+            z, mean, logvar = self.vae(s, a)
             # o_tag_hat, mean, logvar = self.vae(o, a)
-            _, s_tag, _ = self.vae(o_tag, a)
+            _, z_tag, _ = self.vae(s_tag, a)
 
-            s_tag = s_tag.detach()
-            s = mean.detach()
+            z_tag = z_tag.detach()
+            z_detach = z.detach()
             # Behavioral nets
-            beta = self.beta_net(s)
+            beta = self.beta_net(z_detach)
             beta_log = F.log_softmax(beta, dim=1)
             beta = F.softmax(beta.detach(), dim=1)
 
-            _, _, _, q, q_a = self.value_net(s, a, self.pi_rand_batch)
-            _, _, _, q_tag, _ = self.target_net(s_tag, a, self.pi_rand_batch)
+            _, _, _, q, q_a = self.value_net(z, a, self.pi_rand_batch)
+            _, _, _, q_tag, _ = self.target_net(z_tag, a, self.pi_rand_batch)
 
             q = q.detach()
             v_eval = (q * pi).sum(dim=1).abs()
@@ -189,10 +187,8 @@ class RBIAgent(Agent):
             loss_value = (self.q_loss(q_a, r) * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
 
-            loss_vae = 0.5 * (mean**2 + torch.exp(logvar) - logvar).mean() + ((o - o_hat) ** 2).sum(dim=1).mean()
-            imag = o_hat
-            # loss_vae = 0.5 * (mean ** 2 + torch.exp(logvar) - logvar).mean() + ((o - o_tag_hat) ** 2).sum(dim=1).mean()
-            # imag = o_tag_hat
+            loss_vae = 0.5 * (mean**2 + torch.exp(logvar) - logvar).mean()
+            imag = s
 
             # Learning part
 
@@ -201,12 +197,8 @@ class RBIAgent(Agent):
             self.optimizer_beta.step()
 
             self.optimizer_value.zero_grad()
-            loss_value.backward()
+            (loss_value + loss_vae).backward()
             self.optimizer_value.step()
-
-            self.optimizer_vae.zero_grad()
-            loss_vae.backward()
-            self.optimizer_vae.step()
 
             # collect actions statistics
             if not n % 50:
@@ -443,9 +435,9 @@ class RBIAgent(Agent):
                 self.value_net.eval()
                 self.vae.eval()
 
-            o = torch.cat([env.s for env in mp_env]).to(self.device)
+            s = torch.cat([env.s for env in mp_env]).to(self.device)
 
-            _, s, _ = self.vae(o, a_zeros_mp)
+            _, s, _ = self.vae(s, a_zeros_mp)
             s = s.detach()
 
             beta = self.beta_net(s)
