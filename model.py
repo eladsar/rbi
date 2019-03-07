@@ -47,16 +47,11 @@ class Encoder(nn.Module):
         self.cnn[2].bias.data.zero_()
         self.cnn[4].bias.data.zero_()
 
-        # initialization
-        self.dconv[0].bias.data.zero_()
-        self.dconv[2].bias.data.zero_()
-        self.dconv[4].bias.data.zero_()
-
     def reset(self):
         for weight in self.parameters():
             nn.init.xavier_uniform(weight.data)
 
-    def forward(self, s, a):
+    def forward(self, s):
 
         # state CNN
         batch = s.size(0)
@@ -64,8 +59,8 @@ class Encoder(nn.Module):
         s = s.view(batch, -1)
 
         mean = self.mean(s)
-        logvar = self.logvar(s)
 
+        logvar = self.logvar(s)
         z = self.var_layer(batch, mean, logvar)
 
         return z, mean, logvar
@@ -76,6 +71,8 @@ class DuelNet(nn.Module):
     def __init__(self):
 
         super(DuelNet, self).__init__()
+
+        self.encoder = Encoder()
 
         # value net
         self.fc_v = nn.Sequential(
@@ -97,6 +94,8 @@ class DuelNet(nn.Module):
 
     def forward(self, s, a, beta):
 
+        _, s, _ = self.encoder(s)
+
         v = self.fc_v(s)
         adv_tilde = self.fc_adv(s)
 
@@ -117,6 +116,8 @@ class BehavioralNet(nn.Module):
 
         super(BehavioralNet, self).__init__()
 
+        self.encoder = Encoder()
+
         # advantage net
         self.fc_beta = nn.Sequential(
             nn.Linear(args.hidden_features, args.hidden_features),
@@ -130,6 +131,7 @@ class BehavioralNet(nn.Module):
 
     def forward(self, s):
 
+        _, s, _ = self.encoder(s)
         beta = self.fc_beta(s)
 
         return beta
