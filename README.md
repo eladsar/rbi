@@ -80,6 +80,7 @@ mkdir -p ~/projects
 cd ~/projects
 git clone https://github.com/eladsar/rbi.git
 cd ~/projects/rbi
+conda update -n base conda
 conda env create -f install/environment.yml
 source activate torch1
 pip install atari-py
