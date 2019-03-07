@@ -46,14 +46,14 @@ class Memory(torch.utils.data.Dataset):
     def preprocess_history(self, episode_dir, frame):
 
         frame0 = [os.path.join(episode_dir, "%d.png" % (frame - i)) for i in range(self.history_length)]
-        # return np.stack([(cv2.resize(cv2.imread(f0, imread_grayscale).astype(np.float32), (img_width, img_height), interpolation=interpolation) / 256.) for f0 in frame0], axis=0)
-        o = [(cv2.resize(cv2.imread(f0, imread_grayscale).astype(np.float32), (img_width, img_height), interpolation=interpolation) / 256.) for f0 in frame0]
-        o.insert(0, np.zeros((img_width, img_height), dtype=np.float32))
-        o = np.stack(o, axis=0)
-        o = np.diff(o, axis=0)
+        return np.stack([(cv2.resize(cv2.imread(f0, imread_grayscale).astype(np.float32), (img_width, img_height), interpolation=interpolation) / 256.) for f0 in frame0], axis=0)
+        # o = [(cv2.resize(cv2.imread(f0, imread_grayscale).astype(np.float32), (img_width, img_height), interpolation=interpolation) / 256.) for f0 in frame0]
+        # o.insert(0, np.zeros((img_width, img_height), dtype=np.float32))
+        # o = np.stack(o, axis=0)
+        # o = np.diff(o, axis=0)
         # o = o * img_width * img_height / o.sum(axis=(1, 2), keepdims=True) / 2
         # print(o.shape)
-        return o
+        # return o
 
 
 
