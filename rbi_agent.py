@@ -18,7 +18,6 @@ from preprocess import get_tde_value, get_mc_value, h_torch, hinv_torch, release
 import cv2
 import os
 import time
-import itertools
 
 imcompress = cv2.IMWRITE_PNG_COMPRESSION
 compress_level = 2
@@ -44,7 +43,6 @@ class RBIAgent(Agent):
         self.beta_net.to(self.device)
         self.value_net.to(self.device)
         self.target_net.to(self.device)
-
         self.target_net.load_state_dict(self.value_net.state_dict())
 
         self.pi_rand = np.ones(self.action_space) / self.action_space
@@ -78,8 +76,7 @@ class RBIAgent(Agent):
         # configure learning
 
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
-        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(),
-                                                lr=0.00025/4, eps=1.5e-4, weight_decay=0)
+        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
         self.optimizer_beta = torch.optim.Adam(self.beta_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
         self.n_offset = 0
 
@@ -166,14 +163,14 @@ class RBIAgent(Agent):
             is_value = tde ** (-self.priority_beta)
             is_value = is_value / is_value.max()
 
+            # is_policy = is_value
+
             v_diff = (q * (beta - pi)).abs().sum(dim=1)
             is_policy = (torch.min(v_diff, v_diff/v_eval) / tde) ** self.priority_alpha
             is_policy = is_policy / is_policy.max()
 
             loss_value = (self.q_loss(q_a, r) * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
-
-            imag = s
 
             # Learning part
 
@@ -239,7 +236,7 @@ class RBIAgent(Agent):
                     results['q_a'] = np.concatenate(results['q_a'])
                     results['a_player'] = np.concatenate(results['a_player'])
                     results['mc_val'] = np.concatenate(results['mc_val'])
-                    results['image'] = imag[0, :-1, :, :].data.cpu()
+                    results['image'] = s[0, :-1, :, :].data.cpu()
 
                     yield results
                     self.beta_net.train()

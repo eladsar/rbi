@@ -17,16 +17,12 @@ class DuelNet(nn.Module):
         self.fc_v = nn.Sequential(
             nn.Linear(3136, args.hidden_features),
             nn.ReLU(),
-            nn.Linear(args.hidden_features, args.hidden_features),
-            nn.ReLU(),
             nn.Linear(args.hidden_features, 1),
         )
 
         # advantage net
         self.fc_adv = nn.Sequential(
             nn.Linear(3136, args.hidden_features),
-            nn.ReLU(),
-            nn.Linear(args.hidden_features, args.hidden_features),
             nn.ReLU(),
             nn.Linear(args.hidden_features, action_space),
         )
@@ -90,8 +86,6 @@ class BehavioralNet(nn.Module):
         self.fc_beta = nn.Sequential(
             nn.Linear(3136, args.hidden_features),
             nn.ReLU(),
-            nn.Linear(args.hidden_features, args.hidden_features),
-            nn.ReLU(),
             nn.Linear(args.hidden_features, action_space),
         )
 
@@ -114,136 +108,6 @@ class BehavioralNet(nn.Module):
 
         return beta
 
-'''
-class VarLayer(nn.Module):
-
-    def __init__(self, size):
-        super(VarLayer, self).__init__()
-        # self.generator = torch.distributions.normal.Normal(torch.zeros(size), torch.ones(size))
-        self.size = size
-
-    def forward(self, batch, mean, logvar):
-
-        if self.training:
-            return mean + torch.cuda.FloatTensor(batch, self.size).normal_() * torch.exp(0.5 * logvar)
-            # return mean + self.generator.sample((batch,)) * torch.exp(0.5 * logvar)
-        return mean
-
-
-class Encoder(nn.Module):
-
-    def __init__(self):
-
-        super(Encoder, self).__init__()
-
-        self.mean = nn.Linear(3136, args.hidden_features)
-        self.logvar = nn.Linear(3136, args.hidden_features)
-        self.var_layer = VarLayer(args.hidden_features)
-
-        # batch normalization and dropout
-        self.cnn = nn.Sequential(
-            nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-        )
-
-        # initialization
-        self.cnn[0].bias.data.zero_()
-        self.cnn[2].bias.data.zero_()
-        self.cnn[4].bias.data.zero_()
-
-    def reset(self):
-        for weight in self.parameters():
-            nn.init.xavier_uniform(weight.data)
-
-    def forward(self, s):
-
-        # state CNN
-        batch = s.size(0)
-        s = self.cnn(s)
-        s = s.view(batch, -1)
-
-        mean = self.mean(s)
-
-        logvar = self.logvar(s)
-        z = self.var_layer(batch, mean, logvar)
-
-        return z, mean, logvar
-
-
-class DuelNet(nn.Module):
-
-    def __init__(self):
-
-        super(DuelNet, self).__init__()
-
-        self.encoder = Encoder()
-
-        # value net
-        self.fc_v = nn.Sequential(
-            nn.Linear(args.hidden_features, args.hidden_features),
-            nn.ReLU(),
-            nn.Linear(args.hidden_features, 1),
-        )
-
-        # advantage net
-        self.fc_adv = nn.Sequential(
-            nn.Linear(args.hidden_features, args.hidden_features),
-            nn.ReLU(),
-            nn.Linear(args.hidden_features, action_space),
-        )
-
-    def reset(self):
-        for weight in self.parameters():
-            nn.init.xavier_uniform(weight.data)
-
-    def forward(self, s, a, beta):
-
-        _, s, _ = self.encoder(s)
-
-        v = self.fc_v(s)
-        adv_tilde = self.fc_adv(s)
-
-        bias = (adv_tilde * beta).sum(1).unsqueeze(1)
-        adv = adv_tilde - bias
-
-        adv_a = adv.gather(1, a).squeeze(1)
-        q = v + adv
-
-        q_a = q.gather(1, a).squeeze(1)
-
-        return v, adv, adv_a, q, q_a
-
-
-class BehavioralNet(nn.Module):
-
-    def __init__(self):
-
-        super(BehavioralNet, self).__init__()
-
-        self.encoder = Encoder()
-
-        # advantage net
-        self.fc_beta = nn.Sequential(
-            nn.Linear(args.hidden_features, args.hidden_features),
-            nn.ReLU(),
-            nn.Linear(args.hidden_features, action_space),
-        )
-
-    def reset(self):
-        for weight in self.parameters():
-            nn.init.xavier_uniform(weight.data)
-
-    def forward(self, s):
-
-        _, s, _ = self.encoder(s)
-        beta = self.fc_beta(s)
-
-        return beta
-'''
 
 class DuelRNN(nn.Module):
 
