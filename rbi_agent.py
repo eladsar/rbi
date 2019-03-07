@@ -9,7 +9,7 @@ import torch.nn as nn
 
 from config import consts, args
 import psutil
-from model import BehavioralNet, DuelNet, AutoEncoder
+from model import BehavioralNet, DuelNet
 
 from memory import ReplayBatchSampler, Memory, collate
 from agent import Agent
@@ -35,18 +35,15 @@ class RBIAgent(Agent):
         self.beta_net = BehavioralNet()
         self.value_net = DuelNet()
         self.target_net = DuelNet()
-        self.vae = AutoEncoder()
 
         if torch.cuda.device_count() > 1:
             self.beta_net = nn.DataParallel(self.beta_net)
             self.value_net = nn.DataParallel(self.value_net)
             self.target_net = nn.DataParallel(self.target_net)
-            self.vae = nn.DataParallel(self.vae)
 
         self.beta_net.to(self.device)
         self.value_net.to(self.device)
         self.target_net.to(self.device)
-        self.vae.to(self.device)
 
         self.target_net.load_state_dict(self.value_net.state_dict())
 
@@ -81,7 +78,7 @@ class RBIAgent(Agent):
         # configure learning
 
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
-        self.optimizer_value = torch.optim.Adam(itertools.chain(self.value_net.parameters(), self.vae.parameters()),
+        self.optimizer_value = torch.optim.Adam(self.value_net.parameters(),
                                                 lr=0.00025/4, eps=1.5e-4, weight_decay=0)
         self.optimizer_beta = torch.optim.Adam(self.beta_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
         self.n_offset = 0
@@ -92,7 +89,6 @@ class RBIAgent(Agent):
             state = {'beta_net': self.beta_net.module.state_dict(),
                      'value_net': self.value_net.module.state_dict(),
                      'target_net': self.target_net.module.state_dict(),
-                     'vae': self.vae.module.state_dict(),
                      'optimizer_value': self.optimizer_value.state_dict(),
                      'optimizer_beta': self.optimizer_beta.state_dict(),
                      'aux': aux}
@@ -100,7 +96,6 @@ class RBIAgent(Agent):
             state = {'beta_net': self.beta_net.state_dict(),
                      'value_net': self.value_net.state_dict(),
                      'target_net': self.target_net.state_dict(),
-                     'vae': self.vae.state_dict(),
                      'optimizer_value': self.optimizer_value.state_dict(),
                      'optimizer_beta': self.optimizer_beta.state_dict(),
                      'aux': aux}
@@ -115,12 +110,10 @@ class RBIAgent(Agent):
             self.beta_net.module.load_state_dict(state['beta_net'])
             self.value_net.module.load_state_dict(state['value_net'])
             self.target_net.module.load_state_dict(state['target_net'])
-            self.vae.module.load_state_dict(state['vae'])
         else:
             self.beta_net.load_state_dict(state['beta_net'])
             self.value_net.load_state_dict(state['value_net'])
             self.target_net.load_state_dict(state['target_net'])
-            self.vae.load_state_dict(state['vae'])
 
         self.optimizer_beta.load_state_dict(state['optimizer_beta'])
         self.optimizer_value.load_state_dict(state['optimizer_value'])
@@ -137,7 +130,6 @@ class RBIAgent(Agent):
 
         self.beta_net.train()
         self.value_net.train()
-        self.vae.train()
         self.target_net.eval()
 
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
@@ -157,19 +149,13 @@ class RBIAgent(Agent):
             pi_tag = sample['pi_tag'].to(self.device)
             tde = sample['tde'].to(self.device)
 
-            z, mean, logvar = self.vae(s, a)
-            # o_tag_hat, mean, logvar = self.vae(o, a)
-            _, z_tag, _ = self.vae(s_tag, a)
-
-            z_tag = z_tag.detach()
-            z_detach = z.detach()
             # Behavioral nets
-            beta = self.beta_net(z_detach)
+            beta = self.beta_net(s)
             beta_log = F.log_softmax(beta, dim=1)
             beta = F.softmax(beta.detach(), dim=1)
 
-            _, _, _, q, q_a = self.value_net(z, a, self.pi_rand_batch)
-            _, _, _, q_tag, _ = self.target_net(z_tag, a, self.pi_rand_batch)
+            _, _, _, q, q_a = self.value_net(s, a, self.pi_rand_batch)
+            _, _, _, q_tag, _ = self.target_net(s_tag, a, self.pi_rand_batch)
 
             q = q.detach()
             v_eval = (q * pi).sum(dim=1).abs()
@@ -187,7 +173,6 @@ class RBIAgent(Agent):
             loss_value = (self.q_loss(q_a, r) * is_value).mean()
             loss_beta = ((-pi * beta_log).sum(dim=1) * is_policy).mean()
 
-            loss_vae = 0.5 * (mean**2 + torch.exp(logvar) - logvar).mean()
             imag = s
 
             # Learning part
@@ -197,7 +182,7 @@ class RBIAgent(Agent):
             self.optimizer_beta.step()
 
             self.optimizer_value.zero_grad()
-            (loss_value + loss_vae).backward()
+            loss_value.backward()
             self.optimizer_value.step()
 
             # collect actions statistics
@@ -433,12 +418,8 @@ class RBIAgent(Agent):
 
                 self.beta_net.eval()
                 self.value_net.eval()
-                self.vae.eval()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
-
-            _, s, _ = self.vae(s, a_zeros_mp)
-            s = s.detach()
 
             beta = self.beta_net(s)
             beta = F.softmax(beta.detach(), dim=1)
