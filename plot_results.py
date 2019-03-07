@@ -66,7 +66,7 @@ ape_experiment_dict = {"breakout": "breakout_ape_exp_0003_20180811_202933",
 reroute_mini_dict = {"mspacman": "mspacman_uniform_is_exp_0000_20190213_195016",
                        "qbert": "qbert_uniform_is_exp_0000_20190212_090734",
                        "spaceinvaders": "spaceinvaders_rbi_uniform_exp_0000_20190215_075454",
-                       "icehockey": "icehockey_m_3p8_exp_0001_20180827_135203",
+                       "icehockey": "icehockey_rbi_min_tde_exp_0000_20190219_224148",
                        }
 
 
