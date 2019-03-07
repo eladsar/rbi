@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
-#!/usr/bin/env bash
+if [ "$1" == "-h" ]; then
+  echo "Usage: `basename $0` <algorithm> <identifier> <game> <resume> <aux>"
+  exit 0
+fi
 
 algorithm=$1
 all="${@:2}"
