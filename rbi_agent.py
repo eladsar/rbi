@@ -416,8 +416,8 @@ class RBIAgent(Agent):
                 except:
                     pass
 
-                self.beta_net.eval()
-                self.value_net.eval()
+                self.beta_net.train()
+                self.value_net.train()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
 

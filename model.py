@@ -7,127 +7,81 @@ import numpy as np
 action_space = len(np.nonzero(consts.actions[args.game])[0])
 
 
-class DuelNet(nn.Module):
+class GaussianProcess(torch.autograd.Function):
 
-    def __init__(self):
+    prior_sigma = 0.1
 
-        super(DuelNet, self).__init__()
+    @staticmethod
+    def forward(ctx, mean, logvar):
+        x = torch.cuda.FloatTensor(mean.shape).normal_()
+        ctx.save_for_backward(x, mean, logvar)
+        return mean + x * torch.exp(0.5 * logvar)
 
-        # value net
-        self.fc_v = nn.Sequential(
-            nn.Linear(3136, args.hidden_features),
-            nn.ReLU(),
-            nn.Linear(args.hidden_features, args.hidden_features),
-            nn.ReLU(),
-            nn.Linear(args.hidden_features, 1),
-        )
+    @staticmethod
+    def backward(ctx, grad_output):
 
-        # advantage net
-        self.fc_adv = nn.Sequential(
-            nn.Linear(3136, args.hidden_features),
-            nn.ReLU(),
-            nn.Linear(args.hidden_features, args.hidden_features),
-            nn.ReLU(),
-            nn.Linear(args.hidden_features, action_space),
-        )
+        scale = (GaussianProcess.prior_sigma ** 2)
+        x, mean, logvar = ctx.saved_tensors
+        grad_mean = grad_output + mean / scale
 
-        # batch normalization and dropout
-        self.cnn = nn.Sequential(
-            nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-        )
+        var = torch.exp(logvar)
+        grad_logvar = 0.5 * (grad_output * x * var ** 0.5 + var / scale - torch.cuda.FloatTensor(logvar.shape).fill_(1))
 
-        # initialization
-        self.cnn[0].bias.data.zero_()
-        self.cnn[2].bias.data.zero_()
-        self.cnn[4].bias.data.zero_()
-
-    def reset(self):
-        for weight in self.parameters():
-            nn.init.xavier_uniform(weight.data)
-
-    def forward(self, s, a, beta):
-
-        # state CNN
-        s = self.cnn(s)
-        s = s.view(s.size(0), -1)
-
-        v = self.fc_v(s)
-        adv_tilde = self.fc_adv(s)
-
-        bias = (adv_tilde * beta).sum(1).unsqueeze(1)
-        adv = adv_tilde - bias
-
-        adv_a = adv.gather(1, a).squeeze(1)
-        q = v + adv
-
-        q_a = q.gather(1, a).squeeze(1)
-
-        return v, adv, adv_a, q, q_a
+        return grad_mean, grad_logvar
 
 
-class BehavioralNet(nn.Module):
+gaussian_process = GaussianProcess.apply
 
-    def __init__(self):
 
-        super(BehavioralNet, self).__init__()
+class StochsticLayer(nn.Module):
 
-        # batch normalization and dropout
-        self.cnn = nn.Sequential(
-            nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-        )
+    def __init__(self, deterministic_layer, *args, **kwargs):
+        super(StochsticLayer, self).__init__()
+        self.mean = deterministic_layer(*args, **kwargs)
+        self.logvar = deterministic_layer(*args, **kwargs)
 
-        # advantage net
-        self.fc_beta = nn.Sequential(
-            nn.Linear(3136, args.hidden_features),
-            nn.ReLU(),
-            nn.Linear(args.hidden_features, args.hidden_features),
-            nn.ReLU(),
-            nn.Linear(args.hidden_features, action_space),
-        )
-
-        # initialization
-        self.cnn[0].bias.data.zero_()
-        self.cnn[2].bias.data.zero_()
-        self.cnn[4].bias.data.zero_()
-
-    def reset(self):
-        for weight in self.parameters():
-            nn.init.xavier_uniform(weight.data)
-
-    def forward(self, s):
-
-        # state CNN
-
-        s = self.cnn(s)
-        s = s.view(s.size(0), -1)
-        beta = self.fc_beta(s)
-
-        return beta
-
-'''
-class VarLayer(nn.Module):
-
-    def __init__(self, size):
-        super(VarLayer, self).__init__()
-        # self.generator = torch.distributions.normal.Normal(torch.zeros(size), torch.ones(size))
-        self.size = size
-
-    def forward(self, batch, mean, logvar):
+    def forward(self, x):
+        mean = self.mean(x)
 
         if self.training:
-            return mean + torch.cuda.FloatTensor(batch, self.size).normal_() * torch.exp(0.5 * logvar)
-            # return mean + self.generator.sample((batch,)) * torch.exp(0.5 * logvar)
+            logvar = self.logvar(x)
+            return gaussian_process(mean, logvar)
+
         return mean
+
+
+class StochsticWeight(nn.Module):
+
+    def __init__(self, deterministic_function, weight, bias, *args, **kwargs):
+        super(StochsticWeight, self).__init__()
+        self.args = args
+        self.kwargs = kwargs
+        self.function = deterministic_function
+
+        self.weight_mean = torch.cuda.FloatTensor(weight, requires_grad=True)
+        self.weight_logvar = torch.cuda.FloatTensor(weight, requires_grad=True)
+
+        if bias is not None:
+            self.bias_mean = torch.cuda.FloatTensor(bias, requires_grad=True)
+            self.bias_logvar = torch.cuda.FloatTensor(bias, requires_grad=True)
+        else:
+            self.bias_mean = None
+            self.bias_logvar = None
+
+    def forward(self, x):
+
+        if self.training:
+            weight = gaussian_process(self.weight_mean, self.weight_logvar)
+            if self.bias_mean is not None:
+                bias = gaussian_process(self.bias_mean, self.bias_logvar)
+            else:
+                bias = None
+
+        else:
+            weight = self.weight_mean
+            bias = self.bias_mean
+
+        return self.function(x, weight, bias=bias, *self.args, **self.kwargs)
 
 
 class Encoder(nn.Module):
@@ -136,9 +90,7 @@ class Encoder(nn.Module):
 
         super(Encoder, self).__init__()
 
-        self.mean = nn.Linear(3136, args.hidden_features)
-        self.logvar = nn.Linear(3136, args.hidden_features)
-        self.var_layer = VarLayer(args.hidden_features)
+        self.latent_layer = StochsticLayer(nn.Linear, 3136, args.hidden_features, bias=False)
 
         # batch normalization and dropout
         self.cnn = nn.Sequential(
@@ -162,16 +114,11 @@ class Encoder(nn.Module):
     def forward(self, s):
 
         # state CNN
-        batch = s.size(0)
         s = self.cnn(s)
-        s = s.view(batch, -1)
+        s = s.view(s.size(0), -1)
+        s = self.latent_layer(s)
 
-        mean = self.mean(s)
-
-        logvar = self.logvar(s)
-        z = self.var_layer(batch, mean, logvar)
-
-        return z, mean, logvar
+        return s
 
 
 class DuelNet(nn.Module):
@@ -202,7 +149,7 @@ class DuelNet(nn.Module):
 
     def forward(self, s, a, beta):
 
-        _, s, _ = self.encoder(s)
+        s = self.encoder(s)
 
         v = self.fc_v(s)
         adv_tilde = self.fc_adv(s)
@@ -239,11 +186,11 @@ class BehavioralNet(nn.Module):
 
     def forward(self, s):
 
-        _, s, _ = self.encoder(s)
+        s = self.encoder(s)
         beta = self.fc_beta(s)
 
         return beta
-'''
+
 
 class DuelRNN(nn.Module):
 
