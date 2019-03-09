@@ -53,15 +53,14 @@ class RBIAgent(Agent):
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
         self.a_zeros_batch = self.a_zeros.repeat(self.batch, 1)
 
-        self.q_loss = nn.SmoothL1Loss(reduction='none')
+        # self.q_loss = nn.SmoothL1Loss(reduction='none')
+        self.q_loss = nn.MSELoss(reduction='none')
 
         if player:
 
             # play variables
             self.env = Env()
             self.a_zeros = torch.zeros(1, 1).long().to(self.device)
-            self.trajectory = []
-            self.images = []
             self.choices = np.arange(self.action_space, dtype=np.int)
             self.n_replay_saved = 1
             self.frame = 0
@@ -416,8 +415,8 @@ class RBIAgent(Agent):
                 except:
                     pass
 
-                self.beta_net.train()
-                self.value_net.train()
+                self.beta_net.eval()
+                self.value_net.eval()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
 

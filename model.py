@@ -7,7 +7,7 @@ import numpy as np
 action_space = len(np.nonzero(consts.actions[args.game])[0])
 
 
-class GaussianProcess(torch.autograd.Function):
+'''class GaussianProcess(torch.autograd.Function):
 
     prior_sigma = 0.1
 
@@ -27,7 +27,34 @@ class GaussianProcess(torch.autograd.Function):
         var = torch.exp(logvar)
         grad_logvar = 0.5 * (grad_output * x * var ** 0.5 + var / scale - torch.cuda.FloatTensor(logvar.shape).fill_(1))
 
-        return grad_mean, grad_logvar
+        return grad_mean, grad_logvar'''
+
+
+class GaussianProcess(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, mean, rho):
+        x = torch.cuda.FloatTensor(mean.shape).normal_()
+        ctx.save_for_backward(x, mean, rho)
+        std = torch.log1p(torch.exp(rho))
+        return mean + x * std
+
+    @staticmethod
+    def backward(ctx, grad_output):
+
+        x, mean, rho = ctx.saved_tensors
+
+        # grad_mean = grad_output
+        # std_tag = torch.exp(rho) / (1 + torch.exp(rho))
+        # grad_std = x * std_tag
+
+        grad_mean = grad_output + mean
+
+        std = torch.log1p(torch.exp(rho))
+        std_tag = torch.exp(rho) / (1 + torch.exp(rho))
+        grad_std = x * std_tag + std_tag * std - std_tag / std
+
+        return grad_mean, grad_std
 
 
 gaussian_process = GaussianProcess.apply
@@ -45,9 +72,11 @@ class StochsticLayer(nn.Module):
 
         if self.training:
             logvar = self.logvar(x)
-            return gaussian_process(mean, logvar)
+            y = gaussian_process(mean, logvar)
+        else:
+            y = mean
 
-        return mean
+        return y
 
 
 class StochsticWeight(nn.Module):
@@ -86,11 +115,14 @@ class StochsticWeight(nn.Module):
 
 class Encoder(nn.Module):
 
-    def __init__(self):
+    def __init__(self, stochastic=True):
 
         super(Encoder, self).__init__()
 
-        self.latent_layer = StochsticLayer(nn.Linear, 3136, args.hidden_features, bias=False)
+        if stochastic:
+            self.latent_layer = StochsticLayer(nn.Linear, 3136, args.hidden_features, bias=False)
+        else:
+            self.latent_layer = nn.Linear(3136, args.hidden_features)
 
         # batch normalization and dropout
         self.cnn = nn.Sequential(
@@ -127,7 +159,7 @@ class DuelNet(nn.Module):
 
         super(DuelNet, self).__init__()
 
-        self.encoder = Encoder()
+        self.encoder = Encoder(stochastic=True)
 
         # value net
         self.fc_v = nn.Sequential(
@@ -171,7 +203,7 @@ class BehavioralNet(nn.Module):
 
         super(BehavioralNet, self).__init__()
 
-        self.encoder = Encoder()
+        self.encoder = Encoder(stochastic=True)
 
         # advantage net
         self.fc_beta = nn.Sequential(
