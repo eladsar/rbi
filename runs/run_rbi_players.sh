@@ -25,7 +25,7 @@ args="--algorithm=rbi --n-steps=3 --no-reward-shape --no-dropout --no-infinite-h
 --epsilon=0.00164 --cpu-workers=48 \
 --update-target-interval=2500 --n-tot=3125000 --checkpoint-interval=5000 \
 --random-initialization=2500 --player-replay-size=2500 --update-memory-interval=100 \
---load-memory-interval=100 --replay-updates-interval=2500 --replay-memory-size=2000000 --n-actors=16"
+--load-memory-interval=100 --replay-updates-interval=2500 --replay-memory-size=2000000 --n-actors=320"
 
 CUDA_VISIBLE_DEVICES=1, python $loc/main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --actor-index=0 $args $aux &
 CUDA_VISIBLE_DEVICES=1, python $loc/main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --actor-index=1 $args $aux &
@@ -45,6 +45,11 @@ CUDA_VISIBLE_DEVICES=3, python $loc/main.py --multiplay --identifier=$identifier
 CUDA_VISIBLE_DEVICES=3, python $loc/main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --actor-index=13 $args $aux &
 CUDA_VISIBLE_DEVICES=3, python $loc/main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --actor-index=14 $args $aux &
 CUDA_VISIBLE_DEVICES=3, python $loc/main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --actor-index=15 $args $aux &
+
+CUDA_VISIBLE_DEVICES=1, python $loc/main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --actor-index=16 $args $aux &
+CUDA_VISIBLE_DEVICES=2, python $loc/main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --actor-index=17 $args $aux &
+CUDA_VISIBLE_DEVICES=3, python $loc/main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --actor-index=18 $args $aux &
+CUDA_VISIBLE_DEVICES=3, python $loc/main.py --multiplay --identifier=$identifier --resume=$resume --load-last-model --game=$game --actor-index=19 $args $aux &
 
 CUDA_VISIBLE_DEVICES=3, python $loc/main.py --clean --identifier=$identifier --resume=$resume --load-last-model --game=$game $args $aux &
 CUDA_VISIBLE_DEVICES=3, python $loc/main.py --evaluate --identifier=$identifier --resume=$resume --load-last-model --game=$game --play-episodes-interval=16 --wait=150 $tensor $args $aux &

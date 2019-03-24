@@ -34,6 +34,8 @@ class Agent(object):
         self.cuda_id = args.cuda_default
         self.behavioral_avg_frame = 1
         self.behavioral_avg_score = -1
+        self.behavioral_min_score = -1
+        self.explore_threshold = 0
         self.entropy_loss = float((1 - (1 / (1 + (self.action_space - 1) * np.exp(-args.softmax_diff)))) * (self.action_space / (self.action_space - 1)))
         self.batch = args.batch
         self.replay_memory_size = args.replay_memory_size
@@ -102,7 +104,7 @@ class Agent(object):
         raise NotImplementedError
 
     def set_player(self, player, cmin=None, cmax=None, delta=None,
-                   epsilon=None, behavioral_avg_score=None,
+                   epsilon=None, behavioral_avg_score=None, behavioral_min_score=None,
                    behavioral_avg_frame=None, explore_threshold=None):
 
         self.player = player
@@ -127,6 +129,9 @@ class Agent(object):
 
         if behavioral_avg_frame is not None:
             self.behavioral_avg_frame = behavioral_avg_frame
+
+        if behavioral_min_score is not None:
+            self.behavioral_min_score = behavioral_min_score
 
     def resume(self, model_path):
         aux = self.load_checkpoint(model_path)

@@ -168,7 +168,7 @@ class Experiment(object):
 
         for n, train_results in enumerate(learn):
 
-            n = n * args.checkpoint_interval
+            n = (n + 1) * args.checkpoint_interval
 
             avg_train_loss_beta = np.mean(train_results['loss_beta'])
             avg_train_loss_v_beta = np.mean(train_results['loss_value'])
@@ -254,7 +254,7 @@ class Experiment(object):
             player = self.get_player(agent)
             if player:
                 agent.set_player(player['player'], behavioral_avg_score=player['high'],
-                                 behavioral_avg_frame=player['frames'])
+                                 behavioral_avg_frame=player['frames'], behavioral_min_score=player['min_score'])
 
     def play(self, params=None):
 
@@ -263,14 +263,15 @@ class Experiment(object):
         aux = agent.resume(self.checkpoint)
 
         n = aux['n']
-        results = {"n" : n, "score": [], "frame": []}
+        results = {"n" : n, "score": [], "frame": [], 'min_score': []}
 
         player = agent.play(args.play_episodes_interval, save=False, load=False, fix=True)
 
         for i, step in tqdm(enumerate(player)):
             results["score"].append(step['score'])
             results["frame"].append(step['frames'])
-            print("frames: %d | score: %d |" % (step['frames'], step['score']))
+            results["min_score"].append(step['min_score'])
+            print("frames: %d | score: %d | min_score: %d" % (step['frames'], step['score'], step['min_score']))
 
         if self.log_scores:
             logger.info("Save NPY file: eval_%d_%s.npy" % (n, uuid))
@@ -350,6 +351,7 @@ class Experiment(object):
 
                 scores = []
                 frames = []
+                min_scores = []
                 mc = np.array([])
                 q = np.array([])
 
@@ -359,7 +361,7 @@ class Experiment(object):
 
                 player = agent.play(args.play_episodes_interval, save=False, load=False)
 
-                stats = {"score": [], "frame": [], "time": [], "n": []}
+                stats = {"score": [], "frame": [], "time": [], "n": [], 'min_score': []}
 
                 tic = time.time()
 
@@ -369,11 +371,13 @@ class Experiment(object):
                     tic = time.time()
                     scores.append(step['score'])
                     frames.append(step['frames'])
+                    min_scores.append(step['min_score'])
                     mc = np.concatenate((mc, step['mc']))
                     q = np.concatenate((q, step['q']))
 
                     # add stats results
                     stats["score"].append(step['score'])
+                    stats["min_score"].append(step['min_score'])
                     stats["frame"].append(step['frames'])
                     stats["n"].append(step['n'])
                     stats["time"].append(time.time() - consts.start_time)
@@ -391,6 +395,7 @@ class Experiment(object):
                 # player_params['high'] = score.max()
                 player_params['frames'] = np.percentile(frames, 90)
                 player_params['high'] = np.percentile(scores, 90)
+                player_params['min_score'] = np.percentile(min_scores, 10)
 
                 # save best player checkpoint
                 if player_name != "behavioral" and score.mean() > best_score:

@@ -23,7 +23,7 @@ args="--n-steps=3 --no-reward-shape --no-dropout --no-infinite-horizon \
 --epsilon=0.00164 --cpu-workers=48 \
 --update-target-interval=2500 --n-tot=3125000 --checkpoint-interval=5000 \
 --random-initialization=2500 --player-replay-size=2500 --update-memory-interval=100 \
---load-memory-interval=100 --replay-updates-interval=2500 --replay-memory-size=2000000 --n-actors=16"
+--load-memory-interval=100 --replay-updates-interval=2500 --replay-memory-size=2000000 --n-actors=320"
 
 CUDA_VISIBLE_DEVICES=0, python $loc/main.py --learn --identifier=$identifier --game=$game $resume $args $aux --algorithm=rbi
 

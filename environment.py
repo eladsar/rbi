@@ -33,7 +33,7 @@ class Env(object):
         self.k = 0  # Internal step counter
         self.kk = 0 # within life step counter
         self.lives = 0  # Life counter (used in DeepMind training)
-        self.score = 0
+        self.score, self.min_score = 0, np.inf
         self.frame = None
         self.s, self.r, self.t = None, None, None
         self.aux = torch.zeros(1, 1)
@@ -54,6 +54,7 @@ class Env(object):
     def reset(self):
         # Reset internal
         self.score = 0
+        self.min_score = np.inf
         self.buffer = [np.zeros((args.height, args.width), dtype=np.float32)] * self.history_length
         # Process and return initial state
         self.ale.setInt('random_seed', np.random.randint(2 ** 31))
@@ -118,3 +119,4 @@ class Env(object):
         self.aux = (1 if float(self.kk) > 90 else 0) * torch.ones(1, 1)
 
         self.score += self.r
+        self.min_score = min(self.min_score, self.score)

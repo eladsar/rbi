@@ -161,12 +161,14 @@ class RBIAgent(Agent):
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(v_target))
 
             is_value = tde ** (-self.priority_beta)
+            is_policy = is_value
+
             is_value = is_value / is_value.max()
 
-            # is_policy = is_value
-
             v_diff = (q * (beta - pi)).abs().sum(dim=1)
-            is_policy = (torch.min(v_diff, v_diff/v_eval) / tde) ** self.priority_alpha
+            # is_policy = (torch.min(v_diff, v_diff/v_eval) / tde) ** self.priority_alpha
+            is_policy = is_policy * torch.min(v_diff, v_diff/v_eval) ** self.priority_alpha
+
             is_policy = is_policy / is_policy.max()
 
             loss_value = (self.q_loss(q_a, r) * is_value).mean()
@@ -256,6 +258,7 @@ class RBIAgent(Agent):
             v_target = [[]]
             q_val = []
             lives = self.env.lives
+            min_score = -np.inf
 
             while not fix:
                 try:
@@ -348,11 +351,11 @@ class RBIAgent(Agent):
             mc_val = get_mc_value(rewards, None, self.discount, None)
             q_val = np.array(q_val)
 
-            print("sts | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | nst: %s\t| n %d\t| avg_r: %g\t| avg_f: %g" %
+            print("sts | st: %d\t| [sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | nst: %s\t| n %d\t| avg_r: %g\t| avg_f: %g\t| min: %g\t|" %
                 (self.frame, self.env.score, self.env.k, 0, 0, 0, str(np.nan),
-                self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
+                self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame, self.env.min_score))
 
-            yield {'score': self.env.score,
+            yield {'score': self.env.score, 'min_score': self.env.min_score,
                    'frames': self.env.k, "n": self.n_offset, "mc": mc_val, "q": q_val}
 
             if self.n_offset >= self.n_tot and not fix:
@@ -364,10 +367,17 @@ class RBIAgent(Agent):
 
         n_players = self.n_players
 
-        player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
-        explore_threshold = player_i
+        # player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
+        # explore_i = 0.4 ** (1 + 7 * (1 - player_i))
+        # explore_threshold = player_i
+        # mp_explore = explore_i
 
-        mp_explore = 0.4 ** (1 + 7 * (1 - player_i))
+        players = np.arange(self.n_actors) / (self.n_actors - 1)
+        explorers = 0.4 ** (1 + 7 * (1 - players))
+
+        roll_player = np.random.choice(n_players, size=n_players)
+        explore_threshold = players[roll_player]
+        mp_explore = explorers[roll_player] * np.random.choice(2, size=n_players, p=[0.2, 0.8])
 
         mp_env = [Env() for _ in range(n_players)]
         self.frame = 0
@@ -428,9 +438,8 @@ class RBIAgent(Agent):
             adv = adv.data.cpu().numpy()
             rank = np.argsort(adv, axis=1)
 
-            mp_trigger = np.logical_and(
-                np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
-                explore_threshold >= 0)
+            threshold = self.behavioral_min_score + (self.behavioral_avg_score - self.behavioral_min_score) * explore_threshold
+            mp_trigger = np.logical_or(np.array([env.score for env in mp_env]) >= threshold, explore_threshold == 0)
             exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
 
             if self.n_offset >= self.random_initialization:
@@ -501,8 +510,10 @@ class RBIAgent(Agent):
 
                     trajectory[i].append(episode_df)
 
-                    print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
-                          (self.frame, env.score, env.k, mp_explore[i],  np.sign(explore_threshold[i]), mp_trigger[i], time.time() - self.start_time, self.n_offset, self.behavioral_avg_score, self.behavioral_avg_frame))
+                    print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g\t| min: %g\t|" %
+                          (self.frame, env.score, env.k, mp_explore[i],  np.sign(explore_threshold[i]),
+                           mp_trigger[i], time.time() - self.start_time, self.n_offset, self.behavioral_avg_score,
+                           self.behavioral_avg_frame, env.min_score))
 
                     env.reset()
                     episode[i] = []
@@ -510,6 +521,10 @@ class RBIAgent(Agent):
                     rewards[i] = [[]]
                     v_target[i] = [[]]
                     lives[i] = env.lives
+
+                    roll_player = np.random.choice(n_players)
+                    explore_threshold[i] = players[roll_player]
+                    mp_explore[i] = explorers[roll_player] * np.random.choice(2, p=[0.2, 0.8])
 
                     # get new episode number
 
