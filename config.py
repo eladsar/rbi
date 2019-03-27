@@ -4,6 +4,7 @@ import numpy as np
 import socket
 import os
 import pwd
+import atari_py
 
 parser = argparse.ArgumentParser(description='atari')
 username = pwd.getpwuid(os.geteuid()).pw_name
@@ -215,6 +216,17 @@ class Consts(object):
                         "icehockey":     1,
                         "kangaroo":     100,
     }
+
+    if args.game not in gym_game_dict:
+        tmp_ale = atari_py.ALEInterface()
+        tmp_ale.loadROM(atari_py.get_game_path(args.game))
+        game_actions = np.zeros(action_space, dtype=np.int)
+        game_actions[tmp_ale.getMinimalActionSet()] = 1
+        actions[args.game] = list(game_actions)
+        max_score[args.game] = np.inf
+        max_length[args.game] = args.max_frame
+        scale_reward[args.game] = 100
+        gym_game_dict[args.game] = args.game
 
     print("Game: %s" % args.game)
 

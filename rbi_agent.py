@@ -76,16 +76,18 @@ class RBIAgent(Agent):
 
         self.n_offset = 0
 
-    def save_checkpoint(self, path, aux=None):
+    def save_checkpoint(self, path, aux=None, update_predict=True):
 
         state = {'beta_net': Agent.state_dict(self.beta_net),
                  'value_net': Agent.state_dict(self.value_net),
                  'target_net': Agent.state_dict(self.target_net),
-                 'predict_net': Agent.state_dict(self.predict_net),
                  'optimizer_value': self.optimizer_value.state_dict(),
                  'optimizer_beta': self.optimizer_beta.state_dict(),
-                 'optimizer_predict': self.optimizer_predict.state_dict(),
                  'aux': aux}
+
+        if update_predict:
+            state['predict_net'] = Agent.state_dict(self.predict_net)
+            state['optimizer_predict'] = self.optimizer_predict.state_dict()
 
         torch.save(state, path)
 
@@ -96,11 +98,13 @@ class RBIAgent(Agent):
         Agent.load_state_dict(self.beta_net, state['beta_net'])
         Agent.load_state_dict(self.value_net, state['value_net'])
         Agent.load_state_dict(self.target_net, state['target_net'])
-        Agent.load_state_dict(self.predict_net, state['predict_net'])
+
+        if 'predict_net' in state:
+            Agent.load_state_dict(self.predict_net, state['predict_net'])
+            self.optimizer_predict.load_state_dict(state['optimizer_predict'])
 
         self.optimizer_beta.load_state_dict(state['optimizer_beta'])
         self.optimizer_value.load_state_dict(state['optimizer_value'])
-        self.optimizer_predict.load_state_dict(state['optimizer_predict'])
         self.n_offset = state['aux']['n']
 
         try:
@@ -175,7 +179,7 @@ class RBIAgent(Agent):
                 print(sd_pred.min())
 
             # image = sd_target
-            image = sd_pred
+            image = sd_pred[self.batch:,:,:,:]
             # print(image)
             # image = (sd_tag[:, 1:, :, :]-sd_tag[:, :-1, :, :])
 
@@ -224,6 +228,7 @@ class RBIAgent(Agent):
             # collect actions statistics
             if not n % 50:
 
+                update_predict = False
                 a_index_np = a[:, 0].data.cpu().numpy()
 
                 # avoid zero pi
@@ -260,13 +265,14 @@ class RBIAgent(Agent):
                 results['loss_std'].append(loss_pred.data.cpu().numpy())
                 results['n'].append(n)
 
-                if not n % self.update_memory_interval:
-                    # save agent state
-                    self.save_checkpoint(self.snapshot_path, {'n': n})
-
                 if not n % self.update_target_interval:
                     # save agent state
+                    update_predict = True
                     self.target_net.load_state_dict(self.value_net.state_dict())
+
+                if not n % self.update_memory_interval:
+                    # save agent state
+                    self.save_checkpoint(self.snapshot_path, {'n': n}, update_predict=update_predict)
 
                 if not n % n_interval:
                     results['act_diff'] = np.concatenate(results['act_diff'])
@@ -275,8 +281,7 @@ class RBIAgent(Agent):
                     results['q_a'] = np.concatenate(results['q_a'])
                     results['a_player'] = np.concatenate(results['a_player'])
                     results['mc_val'] = np.concatenate(results['mc_val'])
-                    # results['image'] = image[0, :-1, :, :].data.cpu()
-                    results['image'] = image[0, :, :, :].data.cpu()
+                    results['image'] = image[0, :3, :, :].data.cpu()
 
                     yield results
                     self.beta_net.train()
@@ -523,9 +528,14 @@ class RBIAgent(Agent):
 
             # r_kl1 = (sd_pred[:n_players] - sd_pred[n_players:]).abs().detach().view(n_players, -1).sum(dim=1).cpu().numpy()
             # r_kl2 = kl_gaussian(mean[:n_players], var[:n_players], mean[n_players:], var[n_players:])
-            r_kl2 = h_gaussian(mean[:n_players], var[:n_players])
-            # r_kl = (r_kl1 + r_kl2) / 1000
-            r_kl = r_kl2 * (1 - self.discount)
+
+            s_target = ((s[:,1:,:,:] - s[:,:-1,:,:]).abs() > 0).float()
+
+            r_kl = self.pred_loss(sd_pred[n_players:], s_target).detach().view(n_players, -1).mean(dim=1).cpu().numpy()
+
+            # r_kl = h_gaussian(mean[n_players:], var[n_players:])
+
+            r_kl = r_kl * (1 - self.discount)
 
             for i in range(n_players):
 
@@ -581,8 +591,8 @@ class RBIAgent(Agent):
                     lives[i] = env.lives
 
                     roll_player = np.random.choice(self.n_actors)
-                    explore_threshold[i] = players[roll_player]
-                    mp_explore[i] = explorers[roll_player] * np.random.choice(2, p=[0.2, 0.8])
+                    explore_threshold[i] = players[roll_player] * np.random.choice(2, p=[0.2, 0.8])
+                    mp_explore[i] = explorers[roll_player]
 
                     # get new episode number
 
