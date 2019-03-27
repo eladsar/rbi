@@ -9,12 +9,13 @@ import torch.nn as nn
 
 from config import consts, args
 import psutil
-from model import BehavioralNet, DuelNet
+from model import BehavioralNet, DuelNet, PredictNet
 
 from memory import ReplayBatchSampler, Memory, collate
 from agent import Agent
 from environment import Env
-from preprocess import get_tde_value, get_mc_value, h_torch, hinv_torch, release_file, lock_file, get_td_value, state_to_img
+from preprocess import get_tde_value, get_mc_value, h_torch, hinv_torch, \
+                       release_file, lock_file, get_td_value, state_to_img, kl_gaussian, h_gaussian
 import cv2
 import os
 import time
@@ -31,18 +32,11 @@ class RBIAgent(Agent):
         print("Learning with RBIAgent")
         super(RBIAgent, self).__init__(root_dir, checkpoint, player)
 
-        self.beta_net = BehavioralNet()
-        self.value_net = DuelNet()
-        self.target_net = DuelNet()
+        self.beta_net = self.net_to_gpu(BehavioralNet())
+        self.value_net = self.net_to_gpu(DuelNet())
+        self.target_net = self.net_to_gpu(DuelNet())
+        self.predict_net = self.net_to_gpu(PredictNet())
 
-        if torch.cuda.device_count() > 1:
-            self.beta_net = nn.DataParallel(self.beta_net)
-            self.value_net = nn.DataParallel(self.value_net)
-            self.target_net = nn.DataParallel(self.target_net)
-
-        self.beta_net.to(self.device)
-        self.value_net.to(self.device)
-        self.target_net.to(self.device)
         self.target_net.load_state_dict(self.value_net.state_dict())
 
         self.pi_rand = np.ones(self.action_space) / self.action_space
@@ -52,6 +46,7 @@ class RBIAgent(Agent):
         self.a_zeros_batch = self.a_zeros.repeat(self.batch, 1)
 
         self.q_loss = nn.SmoothL1Loss(reduction='none')
+        self.pred_loss = nn.BCELoss(reduction='none')
 
         if player:
 
@@ -72,30 +67,25 @@ class RBIAgent(Agent):
             self.train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_sampler=self.train_sampler,
                                                             collate_fn=collate, num_workers=args.cpu_workers,
                                                             pin_memory=True, drop_last=False)
-
         # configure learning
 
         # IT IS IMPORTANT TO ASSIGN MODEL TO CUDA/PARALLEL BEFORE DEFINING OPTIMIZER
         self.optimizer_value = torch.optim.Adam(self.value_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
         self.optimizer_beta = torch.optim.Adam(self.beta_net.parameters(), lr=0.00025/4, eps=1.5e-4, weight_decay=0)
+        self.optimizer_predict = torch.optim.Adam(self.predict_net.parameters(), lr=0.00025 / 4, eps=1.5e-4, weight_decay=0)
+
         self.n_offset = 0
 
     def save_checkpoint(self, path, aux=None):
 
-        if torch.cuda.device_count() > 1:
-            state = {'beta_net': self.beta_net.module.state_dict(),
-                     'value_net': self.value_net.module.state_dict(),
-                     'target_net': self.target_net.module.state_dict(),
-                     'optimizer_value': self.optimizer_value.state_dict(),
-                     'optimizer_beta': self.optimizer_beta.state_dict(),
-                     'aux': aux}
-        else:
-            state = {'beta_net': self.beta_net.state_dict(),
-                     'value_net': self.value_net.state_dict(),
-                     'target_net': self.target_net.state_dict(),
-                     'optimizer_value': self.optimizer_value.state_dict(),
-                     'optimizer_beta': self.optimizer_beta.state_dict(),
-                     'aux': aux}
+        state = {'beta_net': Agent.state_dict(self.beta_net),
+                 'value_net': Agent.state_dict(self.value_net),
+                 'target_net': Agent.state_dict(self.target_net),
+                 'predict_net': Agent.state_dict(self.predict_net),
+                 'optimizer_value': self.optimizer_value.state_dict(),
+                 'optimizer_beta': self.optimizer_beta.state_dict(),
+                 'optimizer_predict': self.optimizer_predict.state_dict(),
+                 'aux': aux}
 
         torch.save(state, path)
 
@@ -103,17 +93,14 @@ class RBIAgent(Agent):
 
         state = torch.load(path, map_location="cuda:%d" % self.cuda_id)
 
-        if torch.cuda.device_count() > 1:
-            self.beta_net.module.load_state_dict(state['beta_net'])
-            self.value_net.module.load_state_dict(state['value_net'])
-            self.target_net.module.load_state_dict(state['target_net'])
-        else:
-            self.beta_net.load_state_dict(state['beta_net'])
-            self.value_net.load_state_dict(state['value_net'])
-            self.target_net.load_state_dict(state['target_net'])
+        Agent.load_state_dict(self.beta_net, state['beta_net'])
+        Agent.load_state_dict(self.value_net, state['value_net'])
+        Agent.load_state_dict(self.target_net, state['target_net'])
+        Agent.load_state_dict(self.predict_net, state['predict_net'])
 
         self.optimizer_beta.load_state_dict(state['optimizer_beta'])
         self.optimizer_value.load_state_dict(state['optimizer_value'])
+        self.optimizer_predict.load_state_dict(state['optimizer_predict'])
         self.n_offset = state['aux']['n']
 
         try:
@@ -127,6 +114,7 @@ class RBIAgent(Agent):
 
         self.beta_net.train()
         self.value_net.train()
+        self.predict_net.train()
         self.target_net.eval()
 
         results = {'n': [], 'loss_value': [], 'loss_beta': [], 'act_diff': [], 'a_agent': [],
@@ -145,6 +133,51 @@ class RBIAgent(Agent):
             pi = sample['pi'].to(self.device)
             pi_tag = sample['pi_tag'].to(self.device)
             tde = sample['tde'].to(self.device)
+
+            # predict net
+
+            sd = torch.cat((s, s), dim=0)
+            # sd_tag = torch.cat((s_tag, s_tag), dim=0)
+            ad = torch.cat((a+1, self.a_zeros_batch), dim=0)
+            sd_pred, mean, var = self.predict_net(sd, ad)
+
+            # sd_target = ((sd_tag - sd).abs() > 0).float()
+            sd_target = ((sd[:,1:,:,:] - sd[:,:-1,:,:]).abs() > 0).float()
+
+            err1 = self.pred_loss(sd_pred, sd_target)
+
+            err1 = err1.view(self.batch * 2, -1).sum(dim=1).mean()
+            err2 = 0.5 * (mean ** 2 + var - torch.log(var) - 1).sum(dim=1).mean()
+
+            loss_pred = (err1 + err2) / 1000
+
+            # loss_pred = ((sd_pred - sd_tag) ** 2).view(self.batch * 2, -1).sum(dim=1).mean() \
+            #             + 0.5 * (mean ** 2 + var - torch.log(var)).sum(dim=1).mean()
+
+            if not n % 100:
+                print("\nelbo")
+                print(err1)
+                print("free energy")
+                print(err2)
+                print("mean stats")
+                print(mean.mean())
+                print(mean.max())
+                print(mean.min())
+                print("var stats")
+                print(var.mean())
+                print(var.max())
+                print(var.min())
+                print("sd_target stats")
+                print(sd_target.max())
+                print(sd_target.min())
+                print("sd_pred stats")
+                print(sd_pred.max())
+                print(sd_pred.min())
+
+            # image = sd_target
+            image = sd_pred
+            # print(image)
+            # image = (sd_tag[:, 1:, :, :]-sd_tag[:, :-1, :, :])
 
             # Behavioral nets
             beta = self.beta_net(s)
@@ -184,6 +217,10 @@ class RBIAgent(Agent):
             loss_value.backward()
             self.optimizer_value.step()
 
+            self.optimizer_predict.zero_grad()
+            loss_pred.backward()
+            self.optimizer_predict.step()
+
             # collect actions statistics
             if not n % 50:
 
@@ -220,7 +257,7 @@ class RBIAgent(Agent):
                 # add results
                 results['loss_beta'].append(loss_beta.data.cpu().numpy())
                 results['loss_value'].append(loss_value.data.cpu().numpy())
-                results['loss_std'].append(0)
+                results['loss_std'].append(loss_pred.data.cpu().numpy())
                 results['n'].append(n)
 
                 if not n % self.update_memory_interval:
@@ -238,7 +275,8 @@ class RBIAgent(Agent):
                     results['q_a'] = np.concatenate(results['q_a'])
                     results['a_player'] = np.concatenate(results['a_player'])
                     results['mc_val'] = np.concatenate(results['mc_val'])
-                    results['image'] = s[0, :-1, :, :].data.cpu()
+                    # results['image'] = image[0, :-1, :, :].data.cpu()
+                    results['image'] = image[0, :, :, :].data.cpu()
 
                     yield results
                     self.beta_net.train()
@@ -258,7 +296,6 @@ class RBIAgent(Agent):
             v_target = [[]]
             q_val = []
             lives = self.env.lives
-            min_score = -np.inf
 
             while not fix:
                 try:
@@ -269,6 +306,7 @@ class RBIAgent(Agent):
 
             self.beta_net.eval()
             self.value_net.eval()
+            self.predict_net.train()
 
             while not self.env.t:
 
@@ -375,7 +413,7 @@ class RBIAgent(Agent):
         players = np.arange(self.n_actors) / (self.n_actors - 1)
         explorers = 0.4 ** (1 + 7 * (1 - players))
 
-        roll_player = np.random.choice(n_players, size=n_players)
+        roll_player = np.random.choice(self.n_actors, size=n_players)
         explore_threshold = players[roll_player]
         mp_explore = explorers[roll_player] * np.random.choice(2, size=n_players, p=[0.2, 0.8])
 
@@ -383,6 +421,7 @@ class RBIAgent(Agent):
         self.frame = 0
 
         a_zeros_mp = self.a_zeros.repeat(n_players, 1)
+
         mp_pi_rand = np.repeat(np.expand_dims(self.pi_rand, axis=0), n_players, axis=0)
 
         range_players = np.arange(n_players)
@@ -390,6 +429,7 @@ class RBIAgent(Agent):
         v_target = [[[]] for _ in range(n_players)]
         episode = [[] for _ in range(n_players)]
         q_a = [[] for _ in range(n_players)]
+        rewards_kl = [[] for _ in range(n_players)]
         image_dir = ['' for _ in range(n_players)]
         trajectory = [[] for _ in range(n_players)]
         screen_dir = [os.path.join(self.explore_dir, "screen")] * n_players
@@ -425,6 +465,7 @@ class RBIAgent(Agent):
 
                 self.beta_net.eval()
                 self.value_net.eval()
+                self.predict_net.eval()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
 
@@ -469,27 +510,43 @@ class RBIAgent(Agent):
 
             v_expected = (q * pi).sum(axis=1)
 
-            for i in range(n_players):
+            a = [np.random.choice(self.choices, p=pi_mix[i]) for i in range(n_players)]
+            a_torch = torch.LongTensor(a).unsqueeze(1).to(self.device)
 
-                a = np.random.choice(self.choices, p=pi_mix[i])
+            sd = torch.cat((s, s), dim=0)
+            ad = torch.cat((a_torch + 1, a_zeros_mp), dim=0)
+
+            # add aux reward
+            sd_pred, mean, var = self.predict_net(sd, ad)
+            mean = mean.detach().cpu().numpy()
+            var = var.detach().cpu().numpy()
+
+            # r_kl1 = (sd_pred[:n_players] - sd_pred[n_players:]).abs().detach().view(n_players, -1).sum(dim=1).cpu().numpy()
+            # r_kl2 = kl_gaussian(mean[:n_players], var[:n_players], mean[n_players:], var[n_players:])
+            r_kl2 = h_gaussian(mean[:n_players], var[:n_players])
+            # r_kl = (r_kl1 + r_kl2) / 1000
+            r_kl = r_kl2 * (1 - self.discount)
+
+            for i in range(n_players):
 
                 env = mp_env[i]
                 cv2.imwrite(os.path.join(image_dir[i], "%s.png" % str(self.frame)), mp_env[i].image, [imcompress, compress_level])
-                episode[i].append(np.array((self.frame, a, pi[i],
+                episode[i].append(np.array((self.frame, a[i], pi[i],
                                             None, None,
                                             episode_num[i], 0., 0, 0,
                                             0., 1., 1., 0, 1., 0), dtype=self.rec_type))
 
-                env.step(a)
+                env.step(a[i])
 
                 if lives[i] > env.lives:
                     rewards[i].append([])
                     v_target[i].append([])
                 lives[i] = env.lives
 
-                rewards[i][-1].append(env.r)
+                rewards[i][-1].append(env.r + r_kl[i])
                 v_target[i][-1].append(v_expected[i])
-                q_a[i].append(q[i][a])
+                q_a[i].append(q[i][a[i]])
+                rewards_kl[i].append(r_kl[i])
 
                 if env.t:
 
@@ -510,19 +567,20 @@ class RBIAgent(Agent):
 
                     trajectory[i].append(episode_df)
 
-                    print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g\t| min: %g\t|" %
+                    print("rbi | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g\t| min: %g\t| r_kl: %g\t|" %
                           (self.frame, env.score, env.k, mp_explore[i],  np.sign(explore_threshold[i]),
                            mp_trigger[i], time.time() - self.start_time, self.n_offset, self.behavioral_avg_score,
-                           self.behavioral_avg_frame, env.min_score))
+                           self.behavioral_avg_frame, env.min_score, np.mean(rewards_kl[i])))
 
                     env.reset()
                     episode[i] = []
                     q_a[i] = []
+                    rewards_kl[i] = []
                     rewards[i] = [[]]
                     v_target[i] = [[]]
                     lives[i] = env.lives
 
-                    roll_player = np.random.choice(n_players)
+                    roll_player = np.random.choice(self.n_actors)
                     explore_threshold[i] = players[roll_player]
                     mp_explore[i] = explorers[roll_player] * np.random.choice(2, p=[0.2, 0.8])
 

@@ -379,3 +379,15 @@ def lock_file(file):
 def release_file(fo):
     fcntl.lockf(fo, fcntl.LOCK_UN)
     fo.close()
+
+
+def kl_gaussian(mean1, var1, mean2, var2):
+
+    kl = 0.5 * np.log(var2 / var1) + 0.5 * (var1 + (mean1 - mean2) ** 2) / var2 - 0.5
+    return kl.mean(axis=1)
+
+
+def h_gaussian(mean, var):
+
+    h = -0.5 * np.log(var) + 0.5 * (var + mean ** 2) - 0.5
+    return h.mean(axis=1)

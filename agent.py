@@ -103,6 +103,27 @@ class Agent(object):
     def evaluate(self, n_interval, n_tot):
         raise NotImplementedError
 
+    @staticmethod
+    def load_state_dict(net, params):
+        if torch.cuda.device_count() > 1:
+            net.module.load_state_dict(params)
+        else:
+            net.load_state_dict(params)
+
+    @staticmethod
+    def state_dict(net):
+        if torch.cuda.device_count() > 1:
+            return net.module.state_dict()
+        return net.state_dict()
+
+    def net_to_gpu(self, net):
+
+        if torch.cuda.device_count() > 1:
+            net = torch.nn.DataParallel(net)
+
+        net.to(self.device)
+        return net
+
     def set_player(self, player, cmin=None, cmax=None, delta=None,
                    epsilon=None, behavioral_avg_score=None, behavioral_min_score=None,
                    behavioral_avg_frame=None, explore_threshold=None):

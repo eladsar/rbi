@@ -200,6 +200,11 @@ class Experiment(object):
                         self.writer.add_histogram("value_net/%s" % name, param.clone().cpu().data.numpy(), n + n_offset,
                                                   'fd')
 
+                if hasattr(agent, "predict_net"):
+                    for name, param in agent.predict_net.named_parameters():
+                        self.writer.add_histogram("predict_net/%s" % name, param.clone().cpu().data.numpy(), n + n_offset,
+                                                  'fd')
+
                 if hasattr(agent, "dqn_net"):
                     for name, param in agent.dqn_net.named_parameters():
                         self.writer.add_histogram("value_net/%s" % name, param.clone().cpu().data.numpy(), n + n_offset,
