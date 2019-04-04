@@ -18,7 +18,6 @@ from preprocess import get_tde_value, get_mc_value, h_torch, hinv_torch, \
                        release_file, lock_file, get_td_value, state_to_img, kl_gaussian, h_gaussian
 
 import scipy.optimize as opt
-from scipy.linalg import block_diag
 
 import cv2
 import os
@@ -493,23 +492,15 @@ class RBIAgent(Agent):
 
             q = q.data.cpu().numpy()
             adv = adv.data.cpu().numpy()
-            # rank = np.argsort(adv, axis=1)
 
             threshold = self.behavioral_min_score + (self.behavioral_avg_score - self.behavioral_min_score) * explore_threshold
             mp_trigger = np.logical_or(np.array([env.score for env in mp_env]) >= threshold, explore_threshold == 0)
             exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
 
-            if self.n_offset >= 0: # self.random_initialization:
+            beta = (1 - self.epsilon) * beta + self.epsilon / self.action_space
+            pi = self.cmin * beta
 
-                beta = (1 - self.epsilon) * beta + self.epsilon / self.action_space
-                pi = self.cmin * beta
-
-                # b_ub = (self.cmax - self.cmin) * beta.flatten()
-                # A_eq = block_diag(*((np.ones(self.action_space),) * n_players))
-                # b_eq = np.ones((n_players, 1)) * (1 - self.cmin)
-                #
-                # x = opt.linprog(-adv.flatten(), A_ub, b_ub, A_eq, b_eq)
-                # pi += np.reshape(x.x, (n_players, self.action_space))
+            if self.n_offset >= self.random_initialization:
 
                 for i in range(n_players):
                     b_ub = (self.cmax - self.cmin) * beta[i]
