@@ -23,14 +23,87 @@ class VarLayer(nn.Module):
         return mean
 
 
+# class PredictNet(nn.Module):
+#
+#     def __init__(self):
+#
+#         super(PredictNet, self).__init__()
+#
+#         self.mean = nn.Linear(embedding_len + 3136, args.hidden_features)
+#         self.rho = nn.Linear(embedding_len + 3136, args.hidden_features)
+#         self.var_layer = VarLayer(args.hidden_features)
+#
+#         # batch normalization and dropout
+#         self.cnn = nn.Sequential(
+#             nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
+#             nn.ReLU(),
+#             nn.Conv2d(32, 64, kernel_size=4, stride=2),
+#             nn.ReLU(),
+#             nn.Conv2d(64, 64, kernel_size=3, stride=1),
+#             nn.ReLU(),
+#         )
+#
+#         self.action_embedding = nn.Embedding(action_space+1, embedding_len)
+#
+#         # initialization
+#         self.cnn[0].bias.data.zero_()
+#         self.cnn[2].bias.data.zero_()
+#         self.cnn[4].bias.data.zero_()
+#
+#         self.dlin = nn.Sequential(
+#             nn.Linear(args.hidden_features, 3136),
+#             nn.ReLU(),
+#         )
+#
+#         self.dconv = nn.Sequential(
+#             nn.ConvTranspose2d(64, 64, kernel_size=3, stride=1),
+#             nn.ReLU(),
+#             nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2),
+#             nn.ReLU(),
+#             nn.ConvTranspose2d(32, args.history_length-1, kernel_size=8, stride=4),
+#             nn.Sigmoid(),
+#         )
+#
+#         # initialization
+#         self.dconv[0].bias.data.zero_()
+#         self.dconv[2].bias.data.zero_()
+#         self.dconv[4].bias.data.zero_()
+#
+#     def reset(self):
+#         for weight in self.parameters():
+#             nn.init.xavier_uniform(weight.data)
+#
+#     def forward(self, s, a):
+#
+#         # state CNN
+#         batch = s.size(0)
+#         s = self.cnn(s)
+#         s = s.view(batch, -1)
+#
+#         a = self.action_embedding(a)
+#         a = a.squeeze(1)
+#
+#         s = torch.cat((s, a), dim=1)
+#
+#         mean = self.mean(s)
+#         rho = self.rho(s)
+#
+#         s = self.var_layer(batch, mean, rho)
+#         s = self.dlin(s)
+#         s = s.view(batch, 64, 7, 7)
+#         s = self.dconv(s)
+#
+#         return s, mean, torch.log1p(torch.exp(rho)) ** 2
+
+
 class PredictNet(nn.Module):
 
     def __init__(self):
 
         super(PredictNet, self).__init__()
 
-        self.mean = nn.Linear(embedding_len + 3136, args.hidden_features)
-        self.rho = nn.Linear(embedding_len + 3136, args.hidden_features)
+        self.mean = nn.Linear(3136, args.hidden_features)
+        self.rho = nn.Linear(3136, args.hidden_features)
         self.var_layer = VarLayer(args.hidden_features)
 
         # batch normalization and dropout
@@ -42,8 +115,6 @@ class PredictNet(nn.Module):
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
             nn.ReLU(),
         )
-
-        self.action_embedding = nn.Embedding(action_space+1, embedding_len)
 
         # initialization
         self.cnn[0].bias.data.zero_()
@@ -80,11 +151,6 @@ class PredictNet(nn.Module):
         s = self.cnn(s)
         s = s.view(batch, -1)
 
-        a = self.action_embedding(a)
-        a = a.squeeze(1)
-
-        s = torch.cat((s, a), dim=1)
-
         mean = self.mean(s)
         rho = self.rho(s)
 
@@ -94,7 +160,6 @@ class PredictNet(nn.Module):
         s = self.dconv(s)
 
         return s, mean, torch.log1p(torch.exp(rho)) ** 2
-
 
 class DuelNet(nn.Module):
 

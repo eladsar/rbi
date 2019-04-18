@@ -16,6 +16,9 @@ from agent import Agent
 from environment import Env
 from preprocess import get_tde_value, get_mc_value, h_torch, hinv_torch, \
                        release_file, lock_file, get_td_value, state_to_img, kl_gaussian, h_gaussian
+
+import scipy.optimize as opt
+
 import cv2
 import os
 import time
@@ -140,20 +143,21 @@ class RBIAgent(Agent):
 
             # predict net
 
-            sd = torch.cat((s, s), dim=0)
+            # sd = torch.cat((s, s), dim=0)
             # sd_tag = torch.cat((s_tag, s_tag), dim=0)
-            ad = torch.cat((a+1, self.a_zeros_batch), dim=0)
-            sd_pred, mean, var = self.predict_net(sd, ad)
+            # ad = torch.cat((a+1, self.a_zeros_batch), dim=0)
+            sd_pred, mean, var = self.predict_net(s, a)
 
             # sd_target = ((sd_tag - sd).abs() > 0).float()
-            sd_target = ((sd[:,1:,:,:] - sd[:,:-1,:,:]).abs() > 0).float()
+            # sd_target = ((sd[:,1:,:,:] - sd[:,:-1,:,:]).abs() > 0).float()
+            sd_target = ((s[:, 1:, :, :] - s[:, :-1, :, :]).abs() > 0).float()
 
             err1 = self.pred_loss(sd_pred, sd_target)
 
             err1 = err1.view(self.batch * 2, -1).sum(dim=1).mean()
             err2 = 0.5 * (mean ** 2 + var - torch.log(var) - 1).sum(dim=1).mean()
 
-            loss_pred = (err1 + err2) / 1000
+            loss_pred = (err1 + err2) / 10
 
             # loss_pred = ((sd_pred - sd_tag) ** 2).view(self.batch * 2, -1).sum(dim=1).mean() \
             #             + 0.5 * (mean ** 2 + var - torch.log(var)).sum(dim=1).mean()
@@ -179,7 +183,7 @@ class RBIAgent(Agent):
                 print(sd_pred.min())
 
             # image = sd_target
-            image = sd_pred[self.batch:,:,:,:]
+            image = sd_pred
             # print(image)
             # image = (sd_tag[:, 1:, :, :]-sd_tag[:, :-1, :, :])
 
@@ -415,6 +419,12 @@ class RBIAgent(Agent):
         # explore_threshold = player_i
         # mp_explore = explore_i
 
+        A_ub = np.eye(self.action_space)
+        A_eq = np.ones((1, self.action_space))
+        b_eq = np.ones((1,)) * (1 - self.cmin)
+
+        # A_ub = np.eye(n_players * self.action_space)
+
         players = np.arange(self.n_actors) / (self.n_actors - 1)
         explorers = 0.4 ** (1 + 7 * (1 - players))
 
@@ -470,7 +480,7 @@ class RBIAgent(Agent):
 
                 self.beta_net.eval()
                 self.value_net.eval()
-                self.predict_net.eval()
+                self.predict_net.train()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
 
@@ -482,23 +492,21 @@ class RBIAgent(Agent):
 
             q = q.data.cpu().numpy()
             adv = adv.data.cpu().numpy()
-            rank = np.argsort(adv, axis=1)
 
             threshold = self.behavioral_min_score + (self.behavioral_avg_score - self.behavioral_min_score) * explore_threshold
             mp_trigger = np.logical_or(np.array([env.score for env in mp_env]) >= threshold, explore_threshold == 0)
             exploration = np.repeat(np.expand_dims(mp_explore * mp_trigger, axis=1), self.action_space, axis=1)
 
+            beta = (1 - self.epsilon) * beta + self.epsilon / self.action_space
+            pi = self.cmin * beta
+
             if self.n_offset >= self.random_initialization:
 
-                pi = (1 - self.epsilon) * beta + self.epsilon / self.action_space
-                pi = self.cmin * pi
+                for i in range(n_players):
+                    b_ub = (self.cmax - self.cmin) * beta[i]
+                    x = opt.linprog(-adv[i], A_ub, b_ub, A_eq, b_eq)
+                    pi[i] += x.x
 
-                Delta = np.ones(n_players) - self.cmin
-                for i in range(self.action_space):
-                    a = rank[:, self.action_space - 1 - i]
-                    Delta_a = np.minimum(Delta, (self.cmax - self.cmin) * beta[range_players, a])
-                    Delta -= Delta_a
-                    pi[range_players, a] += Delta_a
 
                 pi_greed = np.zeros((n_players, self.action_space))
                 pi_greed[range(n_players), np.argmax(adv, axis=1)] = 1
@@ -516,13 +524,13 @@ class RBIAgent(Agent):
             v_expected = (q * pi).sum(axis=1)
 
             a = [np.random.choice(self.choices, p=pi_mix[i]) for i in range(n_players)]
-            a_torch = torch.LongTensor(a).unsqueeze(1).to(self.device)
+            # a_torch = torch.LongTensor(a).unsqueeze(1).to(self.device)
 
-            sd = torch.cat((s, s), dim=0)
-            ad = torch.cat((a_torch + 1, a_zeros_mp), dim=0)
+            # sd = torch.cat((s, s), dim=0)
+            # ad = torch.cat((a_torch + 1, a_zeros_mp), dim=0)
 
             # add aux reward
-            sd_pred, mean, var = self.predict_net(sd, ad)
+            sd_pred, mean, var = self.predict_net(s, a)
             mean = mean.detach().cpu().numpy()
             var = var.detach().cpu().numpy()
 
@@ -531,11 +539,18 @@ class RBIAgent(Agent):
 
             s_target = ((s[:,1:,:,:] - s[:,:-1,:,:]).abs() > 0).float()
 
-            r_kl = self.pred_loss(sd_pred[n_players:], s_target).detach().view(n_players, -1).mean(dim=1).cpu().numpy()
+            r_kl = self.pred_loss(sd_pred, s_target).detach().view(n_players, -1).sum(dim=1).cpu().numpy()
+            r_kl -= 0.5 * (mean ** 2 + var - np.log(var) - 1).sum(axis=1)
 
-            # r_kl = h_gaussian(mean[n_players:], var[n_players:])
+            # r_kl = self.pred_loss(sd_pred[n_players:], s_target).detach().view(n_players, -1).mean(dim=1).cpu().numpy() * 100
+            if self.n_offset >= self.random_initialization * 2:
 
-            r_kl = r_kl * (1 - self.discount)
+                # r_kl = h_gaussian(mean[n_players:], var[n_players:])
+
+                r_kl = r_kl * (1 - self.discount) ** 2
+
+            else:
+                r_kl = r_kl * 0
 
             for i in range(n_players):
 
