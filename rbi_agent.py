@@ -540,7 +540,7 @@ class RBIAgent(Agent):
             s_target = ((s[:,1:,:,:] - s[:,:-1,:,:]).abs() > 0).float()
 
             r_kl = self.pred_loss(sd_pred, s_target).detach().view(n_players, -1).sum(dim=1).cpu().numpy()
-            r_kl -= 0.5 * (mean ** 2 + var - np.log(var) - 1).sum(axis=1)
+            r_kl += 0.5 * (mean ** 2 + var - np.log(var) - 1).sum(axis=1)
 
             # r_kl = self.pred_loss(sd_pred[n_players:], s_target).detach().view(n_players, -1).mean(dim=1).cpu().numpy() * 100
             if self.n_offset >= self.random_initialization * 2:
