@@ -63,6 +63,7 @@ parser.add_argument('--skip', type=int, default=4, help='Skip pattern')
 parser.add_argument('--height', type=int, default=84, help='Image Height')
 parser.add_argument('--width', type=int, default=84, help='Image width')
 parser.add_argument('--batch', type=int, default=128, help='Mini-Batch Size')
+parser.add_argument('--stm-batch', type=int, default=128, help='Mini-Batch Size of stm learner')
 parser.add_argument('--max-frame', type=int, default=50000, help='Episode Frame Limit')
 
 parser.add_argument('--seq-length', type=int, default=30, help='Length of RNN sequence')
