@@ -11,7 +11,7 @@ import time
 
 from config import consts, args
 from rbi_agent import RBIAgent
-from ape_agent import ApeAgent
+from stm_ape_agent import ApeAgent
 from r2d2_agent import R2D2Agent
 from rbi_rnn_agent import RBIRNNAgent
 
