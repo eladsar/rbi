@@ -32,7 +32,8 @@ dependencies:
   - gst-plugins-base=1.14.0=hbbd80ab_1
   - gstreamer=1.14.0=hb453b48_1
   - harfbuzz=1.9.0=he243708_1001
-  - hdf5=1.10.4=nompi_h11e915b_1105
+  - pip:
+    - hdf5=1.10.4=nompi_h11e915b_1105
   - icu=58.2=hf484d3e_1000
   - intel-openmp=2019.1=144
   - ipykernel=5.1.0=py36h39e3cac_0
@@ -65,8 +66,8 @@ dependencies:
   - libxcb=1.13=h14c3975_1002
   - libxml2=2.9.8=h143f9aa_1005
   - markupsafe=1.1.0=py36h7b6447c_0
-  - matplotlib=3.0.2=py36h8a2030e_1001
-  - matplotlib-base=3.0.2=py36h167e16e_1001
+  - matplotlib=3.0.2
+  - matplotlib-base=3.0.2
   - mistune=0.8.4=py36h7b6447c_0
   - mkl=2019.1=144
   - mkl_fft=1.0.10=py36_0
@@ -123,7 +124,7 @@ dependencies:
   - tensorboardx=1.6=py_0
   - terminado=0.8.1=py36_1
   - testpath=0.4.2=py36_0
-  - tk=8.6.8=hbc83047_0
+  - tk
   - torchvision=0.2.1=py_2
   - tornado=5.1.1=py36h14c3975_1000
   - tqdm=4.29.1=py_0
