@@ -8,8 +8,7 @@ from tqdm import tqdm
 import psutil
 
 from config import consts, args
-from model import DuelNet
-from model_stm import PolicyNet, PredictNet
+from model_stm import DuelNet
 
 from memory import ReplayBatchSampler, Memory, collate
 from agent import Agent
@@ -19,6 +18,7 @@ import cv2
 import os
 import time
 import math
+from stm import STM
 
 imcompress = cv2.IMWRITE_PNG_COMPRESSION
 compress_level = 2
@@ -34,45 +34,6 @@ class ApeAgent(Agent):
 
         self.value_net = DuelNet()
         self.target_net = DuelNet()
-
-        # stm memory stuff
-        self.policy_stm = PolicyNet()
-        self.memory_stm = PredictNet()
-
-        if torch.cuda.device_count() > 1:
-            self.policy_stm = nn.DataParallel(self.policy_stm)
-            self.memory_stm = nn.DataParallel(self.memory_stm)
-
-        self.policy_stm.to(self.device)
-        self.policy_stm.train()
-
-        self.memory_stm.to(self.device)
-        self.memory_stm.train()
-
-        self.optimizer_net = torch.optim.Adam(self.policy_stm.parameters(), lr=0.001, weight_decay=1e-5)
-        self.optimizer_mem = torch.optim.Adam(self.memory_stm.parameters(), lr=0.001, weight_decay=1e-5)
-
-        self.weight = torch.FloatTensor(exp.class_weight) if args.balance else torch.ones(exp.labels_num)
-        self.weight = self.weight.to(self.device)
-        self.loss_classification = nn.CrossEntropyLoss(weight=self.weight)
-
-        self.loss_classification_forget = nn.KLDivLoss(reduction='none')
-        self.loss_reconstruction = nn.BCEWithLogitsLoss(reduction='none')
-
-        self.punctuation = 1 - math.e ** (-5 / args.epoch)
-
-        self.net_state_0 = list(map(lambda x: x.clone().detach(), self.policy_stm.parameters()))
-        self.net_masks = list(map(lambda x: torch.cuda.FloatTensor(x.shape), self.policy_stm.parameters()))
-        self.net_punct_list = list(map(lambda x: int(0), self.policy_stm.named_parameters()))
-
-        self.mem_state_0 = list(map(lambda x: x.clone().detach(), self.memory_stm.parameters()))
-        self.mem_masks = list(map(lambda x: torch.cuda.FloatTensor(x.shape), self.memory_stm.parameters()))
-        self.mem_punct_list = list(map(lambda x: int('mu' in x[0] or 'rho' in x[0]), self.memory_stm.named_parameters()))
-
-        self.n_iter_net = 20
-        self.n_iter_mem = 20
-
-        # back to dqn stuff
 
         if torch.cuda.device_count() > 1:
             self.value_net = nn.DataParallel(self.value_net)
@@ -99,6 +60,7 @@ class ApeAgent(Agent):
             self.n_replay_saved = 1
             self.frame = 0
             self.states = 0
+            self.stm = STM()
 
         else:
 
@@ -274,6 +236,8 @@ class ApeAgent(Agent):
                     self.value_net.eval()
 
                 s = self.env.s.to(self.device)
+                a_stm = int(self.stm.fetch_gate(s)[0])
+
                 # get aux data
                 _, _, _, q, _ = self.value_net(s, self.a_zeros, pi_rand)
 
@@ -293,6 +257,8 @@ class ApeAgent(Agent):
                 pi_mix = pi_mix.clip(0, 1)
                 pi_mix = pi_mix / pi_mix.sum()
                 a = np.random.choice(self.choices, p=pi_mix)
+
+                a = a if a_stm < 0 else a_stm
                 self.env.step(a)
 
                 if self.env.k >= self.history_length:
@@ -317,109 +283,6 @@ class ApeAgent(Agent):
 
         raise StopIteration
 
-    def stm_fetch_gate(self, s):
-
-        self.policy_stm.train()
-        self.memory_stm.train()
-        a_hat = self.policy_stm(s)
-        a_hat = a_hat.detach()
-        a_hat = torch.argmax(a_hat, dim=1)
-
-        mean, _, _ = self.memory_stm(s)
-        mean = mean.detach()
-
-        z = (a_hat == torch.argmax(mean, dim=1))
-        z = (z * (mean > 0.1)).long()
-
-        a_hat = a_hat * z - (1 - z)
-
-        return a_hat
-
-    def stm_learn_gate(self, q_a, rr, v_0, v_n, tde_quantiles):
-
-        r = np.sum(self.discount ** np.arange(self.n_steps) * rr)
-        tde = r + self.discount ** self.n_steps * v_n - q_a
-
-        return (np.sign(tde) * np.abs(tde / v_0)) > tde_quantiles
-
-    def stm_learn_routine(self, s, a):
-
-        s = torch.stack(s)
-        a = torch.stack(a)
-
-        s_gen = torch.sigmoid(self.memory_stm.gen_samples(self.stm_batch, source='learn').detach()).view(s.shape)
-        theta_snap_net = list(map(lambda x: x.clone().detach(), self.policy_stm.parameters()))
-        theta_snap_mem = list(map(lambda x: x.clone().detach(), self.memory_stm.parameters()))
-
-        # get punctuation pattern
-        masks = list(map(lambda x: x[0].bernoulli_(p=self.punctuation if x[1] else 0),
-                         zip(self.net_masks, self.net_punct_list)))
-
-        with torch.no_grad():
-            for param, mask, org in zip(self.policy_stm.parameters(), masks, self.net_state_0):
-                param.data = mask * org.data + (1 - mask) * param
-
-        # initialize augmented lagrange parameter
-        mu = torch.cuda.FloatTensor(1).fill_(1)
-        lagrange = torch.cuda.FloatTensor(1).fill_(1)
-
-        for _ in range(self.n_iter_net):
-            theta_current = list(self.policy_stm.parameters())
-
-            theta_dist = 0.5 * torch.stack([((1 - mask) * (theta_i - theta_j) ** 2).sum() for theta_i, theta_j, mask
-                                            in zip(theta_snap_net, theta_current, masks)]).sum()
-
-            a_est = self.policy_stm(s)
-            objective = self.loss_classification(a_est, a)
-
-            # PA
-            loss_classification = theta_dist + mu / 2 * objective ** 2 + lagrange * objective
-
-            self.optimizer_net.zero_grad()
-            loss_classification.backward()
-            torch.nn.utils.clip_grad_norm_(self.policy_stm.parameters(), 1000, norm_type=2)
-            self.optimizer_net.step()
-
-            lagrange += mu * objective.detach()
-
-        # NOW FOR THE MEMORY TRAINING
-
-        # get punctuation pattern
-        masks = list(map(lambda x: x[0].bernoulli_(p=self.punctuation if x[1] else 0),
-                         zip(self.mem_masks, self.mem_punct_list)))
-
-        with torch.no_grad():
-            for param, mask, org in zip(self.memory_stm.parameters(), masks, self.mem_state_0):
-                param.data = mask * org.data + (1 - mask) * param
-
-        # initialize augmented lagrange parameter
-        mu = torch.cuda.FloatTensor(1).fill_(1)
-        lagrange = torch.cuda.FloatTensor(1).fill_(1)
-
-        for _ in range(self.n_iter_mem):
-            theta_current = list(self.memory_stm.parameters())
-
-            theta_dist = 0.5 * torch.stack([((1 - mask) * (theta_i - theta_j) ** 2).sum() for theta_i, theta_j, mask
-                                            in zip(theta_snap_mem, theta_current, masks)]).sum()
-
-            s_reconstruct, _, _, kl = self.memory_stm(s, a)
-            s_reconstruct = s_reconstruct.view(*s.shape)
-
-            objective = (self.loss_reconstruction(s_reconstruct, s).mean(dim=0).sum() + kl.mean())
-
-            _, _, kl_forget = self.memory_stm(s_gen)
-
-            objective += kl_forget.mean()
-
-            # PA
-            loss_reconstruction = theta_dist + mu / 2 * objective ** 2 + lagrange * objective
-
-            self.optimizer_mem.zero_grad()
-            loss_reconstruction.backward()
-            torch.nn.utils.clip_grad_norm_(self.memory_stm.parameters(), 1000, norm_type=2)
-            self.optimizer_mem.step()
-
-            lagrange += mu * objective.detach()
 
     def multiplay(self):
 
@@ -481,7 +344,7 @@ class ApeAgent(Agent):
                 self.value_net.eval()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
-            a_stm = self.stm_fetch_gate(s)
+            a_stm = self.stm.fetch_gate(s)
 
             _, _, _, q, _ = self.value_net(s, a_zeros_mp, pi_rand_batch)
 
@@ -531,14 +394,9 @@ class ApeAgent(Agent):
                 v_target[i][-1].append(v_expected[i])
                 q_a[i].append(q[i][a])
 
-                if self.stm_learn_gate(q_a[i][-self.n_steps-1], rewards[i][-self.n_steps-1:-2], v_target[i][-self.n_steps],
-                                       v_target[i][-1], tde_quantile):
-                    stm_queue.append(s[i])
-                    stm_action_queue.append(a)
-                    if len(stm_queue) == self.stm_batch:
-                        self.stm_learn_routine(stm_queue, stm_action_queue)
-                        stm_queue = []
-                        stm_action_queue = []
+                if len(q_a[i]) > self.n_steps:
+                    self.stm.learn_gate(q_a[i][-self.n_steps-1], rewards[i][-self.n_steps-1:-2], v_target[i][-self.n_steps], v_target[i][-1], tde_quantile)
+
 
                 # add to fifo
                 s_fifo.pop(0)
