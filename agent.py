@@ -43,9 +43,11 @@ class Agent(object):
         self.n_players = args.n_players
         self.player = args.player
         self.n_tot = args.n_tot
+        self.stm_enable = args.stm
         self.max_length = consts.max_length[args.game]
         self.max_score = consts.max_score[args.game]
         self.start_time = consts.start_time
+        self.clip = args.clip
 
         self.mix = self.delta
         self.min_loop = 1. / 44

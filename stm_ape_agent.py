@@ -29,7 +29,7 @@ class ApeAgent(Agent):
 
     def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
 
-        print("Learning with Ape Agent")
+        print("Learning with STM-Ape Agent")
         super(ApeAgent, self).__init__(root_dir, checkpoint, player)
 
         self.value_net = DuelNet()
@@ -49,6 +49,7 @@ class ApeAgent(Agent):
         self.pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(self.batch, 1).to(self.device)
 
         self.q_loss = nn.SmoothL1Loss(reduction='none')
+        self.tde_quantile_threshold = 0.9
 
         if player:
 
@@ -128,13 +129,13 @@ class ApeAgent(Agent):
             s_tag = sample['s_tag'].to(self.device)
             tde = sample['tde'].to(self.device)
 
-            _, _, _, q_tag_eval, _ = self.value_net(s_tag, a, self.pi_rand_batch)
+            _, _, _, q_tag_eval, _, _ = self.value_net(s_tag, a, self.pi_rand_batch)
             q_tag_eval = q_tag_eval.detach()
 
-            _, _, _, q_tag_target, _ = self.target_net(s_tag, a, self.pi_rand_batch)
+            _, _, _, q_tag_target, _, _ = self.target_net(s_tag, a, self.pi_rand_batch)
             q_tag_target = q_tag_target.detach()
 
-            _, _, _, q, q_a = self.value_net(s, a, self.pi_rand_batch)
+            _, _, _, q, q_a, _ = self.value_net(s, a, self.pi_rand_batch)
 
             a_tag = torch.argmax(q_tag_eval, dim=1).unsqueeze(1)
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(q_tag_target.gather(1, a_tag).squeeze(1)))
@@ -236,10 +237,11 @@ class ApeAgent(Agent):
                     self.value_net.eval()
 
                 s = self.env.s.to(self.device)
-                a_stm = int(self.stm.fetch_gate(s)[0])
 
                 # get aux data
-                _, _, _, q, _ = self.value_net(s, self.a_zeros, pi_rand)
+                _, _, _, q, _, _ = self.value_net(s, self.a_zeros, pi_rand)
+                # phi = phi.detach()
+                # a_stm = int(self.stm.fetch_gate(phi)[0])
 
                 q = q.squeeze(0).data.cpu().numpy()
 
@@ -258,7 +260,7 @@ class ApeAgent(Agent):
                 pi_mix = pi_mix / pi_mix.sum()
                 a = np.random.choice(self.choices, p=pi_mix)
 
-                a = a if a_stm < 0 else a_stm
+                # a = a if a_stm < 0 else a_stm
                 self.env.step(a)
 
                 if self.env.k >= self.history_length:
@@ -283,7 +285,6 @@ class ApeAgent(Agent):
 
         raise StopIteration
 
-
     def multiplay(self):
 
         n_players = self.n_players
@@ -304,11 +305,10 @@ class ApeAgent(Agent):
         q_a = [[] for _ in range(n_players)]
         image_dir = ['' for _ in range(n_players)]
         trajectory = [[] for _ in range(n_players)]
-        tde_track = [np.zeros(1) for _ in range(n_players)]
-        stm_queue = []
-        stm_action_queue = []
-        s_fifo = [None] * self.n_steps
-        tde_quantile = 0
+
+        stm_statistics = [{'tde_track': np.inf * np.ones(1), 'fetch': 0, 'learn': 0} for _ in range(n_players)]
+        s_fifo = [None] * (self.n_steps+1)
+        tde_quantile = np.inf
 
         screen_dir = [os.path.join(self.explore_dir, "screen")] * n_players
         trajectory_dir = [os.path.join(self.explore_dir, "trajectory")] * n_players
@@ -344,9 +344,15 @@ class ApeAgent(Agent):
                 self.value_net.eval()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
-            a_stm = self.stm.fetch_gate(s)
 
-            _, _, _, q, _ = self.value_net(s, a_zeros_mp, pi_rand_batch)
+            _, _, _, q, _, _ = self.value_net(s, a_zeros_mp, pi_rand_batch)
+            _, _, _, _, _, phi = self.target_net(s, a_zeros_mp, pi_rand_batch)
+
+            phi = phi.detach()
+            a_stm = self.stm.fetch_gate(phi)
+            # add to fifo
+            s_fifo.pop(0)
+            s_fifo.append(phi)
 
             q = q.data.cpu().numpy()
 
@@ -381,7 +387,9 @@ class ApeAgent(Agent):
                                             episode_num[i], 0., 0, 0,
                                             0., 1., 1., 0, 1., 0), dtype=self.rec_type))
 
-                a = a if a_stm[i] < 0 else a_stm[i]
+                if self.stm_enable and a_stm[i] >= 0:
+                    a = a_stm[i]
+                    stm_statistics[i]['fetch'] += 1
 
                 env.step(a)
 
@@ -394,13 +402,24 @@ class ApeAgent(Agent):
                 v_target[i][-1].append(v_expected[i])
                 q_a[i].append(q[i][a])
 
-                if len(q_a[i]) > self.n_steps:
-                    self.stm.learn_gate(q_a[i][-self.n_steps-1], rewards[i][-self.n_steps-1:-2], v_target[i][-self.n_steps], v_target[i][-1], tde_quantile)
+                if len(rewards[i][-1]) > max(self.n_steps, self.history_length):
 
+                    rr = np.array(rewards[i][-1][-self.n_steps-1:-1])
+                    rr = np.clip(rr, -self.clip, self.clip)
 
-                # add to fifo
-                s_fifo.pop(0)
-                s_fifo.append(s)
+                    target = np.sum(rr * self.discount ** np.arange(self.n_steps))
+                    target = target + self.discount ** self.n_steps * v_target[i][-1][-1]
+                    tde = target - q_a[i][-self.n_steps-1]
+                    v_scale = v_target[i][-1][-self.n_steps-1]
+
+                    tde = np.sign(tde) * np.minimum(np.abs(tde), np.abs(tde / v_scale))
+
+                    if tde > tde_quantile:
+                        self.stm.fifo_add(s_fifo[0][i], a=int(episode[i][-self.n_steps-1]['a']), target='learn')
+                        stm_statistics[i]['learn'] += 1
+
+                    elif np.random.rand() > self.tde_quantile_threshold:
+                        self.stm.fifo_add(s_fifo[0][i], target='forget')
 
                 if env.t:
 
@@ -412,8 +431,9 @@ class ApeAgent(Agent):
                     tde = np.sign(tde) * np.minimum(np.abs(tde), np.abs(tde / v_scale))
 
                     # add
-                    tde_track[i] = tde
-                    tde_quantile = np.quantile(np.concatenate(tde_track), 0.9)
+                    stm_statistics[i]['tde_track'] = tde
+                    tde_quantile = np.quantile(np.concatenate([stm_statistics[j]['tde_track'] for j in range(n_players)]),
+                                               self.tde_quantile_threshold)
 
                     # add absolute value and squashing
                     tde = np.abs(tde) ** self.priority_alpha
@@ -430,11 +450,24 @@ class ApeAgent(Agent):
                          time.time() - self.start_time, self.n_offset, self.behavioral_avg_score,
                          self.behavioral_avg_frame))
 
+
+                    stm_stat_string = "stm_stat | tde_mean: %g\t| tde_threshold: %g\t| fetch: %g\t| learn: %g\t|" % \
+                          (np.mean(stm_statistics[i]['tde_track']),
+                           np.quantile(stm_statistics[i]['tde_track'], self.tde_quantile_threshold),
+                           stm_statistics[i]['fetch'] / float(env.k),
+                           stm_statistics[i]['learn'] / float(env.k))
+
+                    for stat in self.stm.statistics:
+                        stm_stat_string += " %s: %g\t|" % (stat, self.stm.statistics[stat])
+
+                    print(stm_stat_string)
+
                     env.reset()
                     episode[i] = []
                     q_a[i] = []
                     rewards[i] = [[]]
                     v_target[i] = [[]]
+                    stm_statistics[i] = {'tde_track': stm_statistics[i]['tde_track'], 'fetch': 0, 'learn': 0}
                     lives[i] = env.lives
 
                     # get new episode number
@@ -499,7 +532,7 @@ class ApeAgent(Agent):
             while not self.env.t:
 
                 s = self.env.s.to(self.device)
-                _, _, _, q, _ = self.value_net(s, self.a_zeros, pi_rand)
+                _, _, _, q, _, _ = self.value_net(s, self.a_zeros, pi_rand)
 
                 q = q.squeeze(0).data.cpu().numpy()
 

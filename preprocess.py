@@ -258,7 +258,8 @@ def get_tde_value(rewards, discount, n_steps):
         if not episode_len:
             continue
 
-        discounts = discount ** np.arange(len(rewards[life])+1)
+        # discounts = discount ** np.arange(len(rewards[life])+1)
+        discounts = discount ** np.arange(n_steps)
 
         r = np.array(rewards[life], dtype=np.float64)
 
@@ -269,16 +270,18 @@ def get_tde_value(rewards, discount, n_steps):
             # r = np.sign(r) * np.log(np.abs(r) + 1)
 
         r[-1] += termination_reward
-        val = np.zeros(r.shape)
+        # val = np.zeros(r.shape)
         t = np.zeros(r.shape)
         t[-n_steps:] = 1
 
-        for i in range(len(r)):
-            val[i] = (r[i:] * discounts[:-i-1]).sum()
+        val = np.correlate(r, discounts, mode="full")[n_steps - 1:]
 
-        if episode_len > n_steps:
-            val_shift = discount ** n_steps * np.concatenate((val[n_steps:], np.zeros(n_steps)))
-            val = val - val_shift
+        # for i in range(len(r)):
+        #     val[i] = (r[i:] * discounts[:-i-1]).sum()
+        #
+        # if episode_len > n_steps:
+        #     val_shift = discount ** n_steps * np.concatenate((val[n_steps:], np.zeros(n_steps)))
+        #     val = val - val_shift
 
         values.append(val)
         terminals.append(t)

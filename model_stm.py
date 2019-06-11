@@ -5,12 +5,12 @@ import math
 from config import consts, args
 import numpy as np
 
-if args.bias_relu:
-    set_bias = True
-    activation = torch.nn.ReLU
-else:
-    set_bias = False
-    activation = torch.nn.LeakyReLU
+# if args.bias_relu:
+#     set_bias = True
+#     activation = torch.nn.ReLU
+# else:
+set_bias = False
+activation = torch.nn.LeakyReLU
 
 action_space = len(np.nonzero(consts.actions[args.game])[0])
 
@@ -74,7 +74,6 @@ class DuelNet(nn.Module):
         return v, adv, adv_a, q, q_a, s
 
 
-
 class VarLayer(nn.Module):
 
     def __init__(self):
@@ -123,18 +122,15 @@ class PredictNet(nn.Module):
         self.latent_dim = args.latent
         self.labels_num = action_space
 
-
         self.encoder = nn.Sequential(
             nn.Linear(3136, 512, bias=set_bias),
             activation(),
             nn.Linear(512, 512, bias=set_bias),
         )
 
-
         self.mu = nn.Linear(512, self.latent_dim * self.labels_num, bias=set_bias)
         self.rho = nn.Linear(512, self.latent_dim * self.labels_num, bias=set_bias)
         self.var_layer = VarLayer()
-
 
         self.decoder = nn.Sequential(
             nn.Linear(self.latent_dim, 512, bias=set_bias),
