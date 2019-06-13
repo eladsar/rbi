@@ -42,7 +42,7 @@ class STM(object):
         self.loss_reconstruction = nn.MSELoss(reduction='none')
 
         # parameters
-        self.n_iter = 100
+        self.n_iter = 50
         self.stm_batch = args.stm_batch
 
         self.learn_queue = []
@@ -73,6 +73,26 @@ class STM(object):
             self.forget_queue = []
             self.action_queue = []
 
+    def fifo_add_batch(self, s, a=None, target='learn'):
+
+        if target == 'learn':
+            self.learn_queue = s
+            self.action_queue = a
+        elif target == 'forget':
+            self.forget_queue = s
+        else:
+            raise NotImplementedError
+
+        if len(self.learn_queue) and len(self.forget_queue):
+
+            self.learn_routine(torch.stack(self.learn_queue),
+                               torch.LongTensor(self.action_queue).to(self.device),
+                               torch.stack(self.forget_queue))
+
+            self.learn_queue = []
+            self.forget_queue = []
+            self.action_queue = []
+
     def fetch_gate(self, s):
 
         self.policy_stm.train()
@@ -88,7 +108,7 @@ class STM(object):
         max_mean = mean.gather(1, a_ind.unsqueeze(1)).squeeze(1)
         a_hat = a_hat.gather(1, a_ind.unsqueeze(1)).squeeze(1)
 
-        z = ((a_ind == torch.argmax(mean, dim=1)) * (max_mean > 0.) * (a_hat > 0.75)).long()
+        z = ((a_ind == torch.argmax(mean, dim=1)) * (max_mean > 0.5) * (a_hat > 0.75)).long()
 
         a_hat = a_ind * z - (1 - z)
 
