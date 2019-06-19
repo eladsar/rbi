@@ -385,7 +385,8 @@ class ApeAgent(Agent):
                                             episode_num[i], 0., 0, 0,
                                             0., 1., 1., 0, 1., 0), dtype=self.rec_type))
 
-                if self.stm_enable and a_stm[i] >= 0:
+                if self.stm_enable and a_stm[i] >= 0 and mp_trigger[i] and \
+                    4 * (self.n_offset >= self.random_initialization):
                     a = a_stm[i]
                     stm_statistics[i]['fetch'] += 1
 
@@ -425,14 +426,15 @@ class ApeAgent(Agent):
                     trajectory[i].append(episode_df)
 
                     # enter important episodes into stm
-                    if env.score >= self.behavioral_avg_score and self.behavioral_avg_score > 0:
-                        self.stm.fifo_add_batch(s_fifo[i], a_fifo[i], target='learn')
+                    if env.score >= self.behavioral_avg_score and self.behavioral_avg_score > 0 and len(s_fifo[i]):
+                        self.stm.fifo_add_batch(torch.stack(s_fifo[i]),
+                                                torch.cuda.LongTensor(a_fifo[i]), target='learn')
                         stm_statistics[i]['learn'] = 1
 
-                    elif np.random.rand() > self.tde_quantile_threshold:
-                        self.stm.fifo_add_batch(s_fifo[i], target='forget')
+                    elif np.random.rand() > self.tde_quantile_threshold and len(s_fifo[i]):
+                        self.stm.fifo_add_batch(torch.stack(s_fifo[i]),
+                                                torch.cuda.LongTensor(a_fifo[i]), target='forget')
                         stm_statistics[i]['learn'] = -1
-
 
                     print("ape | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
                         (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), mp_trigger[i],

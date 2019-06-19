@@ -132,55 +132,22 @@ class PredictNet(nn.Module):
         self.rho = nn.Linear(512, self.latent_dim * self.labels_num, bias=set_bias)
         self.var_layer = VarLayer()
 
-        self.decoder = nn.Sequential(
-            nn.Linear(self.latent_dim, 512, bias=set_bias),
+        self.disc = nn.Sequential(
+            nn.Linear(self.latent_dim, self.latent_dim, bias=set_bias),
             activation(),
-            nn.Linear(512, 512, bias=set_bias),
-            activation(),
-            nn.Linear(512, 3136, bias=set_bias),
+            nn.Linear(self.latent_dim, 1, bias=set_bias),
         )
 
-        self.std_forget = 1
-        self.mu_forget = -1
+        self.std_prior = 1
+        self.mu_prior = 0
 
-        self.std_learn = 1
-        self.mu_learn = 1
+    def forward(self, s, a):
 
-        self.gen_mu = {'learn': self.mu_learn, 'forget': self.mu_forget, 'avg': -0.5, }
-        self.gen_std = {'learn': self.std_learn, 'forget': self.std_forget, 'avg': 1, }
-
-    def gen_samples(self, batch, source='learn'):
-
-        mu = self.gen_mu[source]
-        std = self.gen_std[source]
-
-        mu = torch.cuda.FloatTensor(batch, self.latent_dim).fill_(mu)
-        std = torch.cuda.FloatTensor(batch, self.latent_dim).fill_(std)
-
-        z = self.var_layer(mu, std)
-
-        # decode from latent variable y_hat
-        x = self.decoder(z)
-
-        return x
-
-    def forward(self, s, a=None):
-
-        s_shape = s.shape
         s = self.encoder(s)
 
         mu = self.mu(s)
         rho = self.rho(s)
         std = torch.log1p(torch.exp(rho))
-
-        if a is None:
-            kl = (torch.log(self.std_forget / std) +
-              (std ** 2 + (mu - self.mu_forget) ** 2) / (2 * self.std_forget ** 2) - 0.5).sum(dim=1)
-
-            mu = mu.view(-1, self.latent_dim, self.labels_num)
-            std = std.view(-1, self.latent_dim, self.labels_num)
-
-            return mu, std, kl
 
         a = a.unsqueeze(1)
         a_latent = a.unsqueeze(2).repeat(1, self.latent_dim, 1)
@@ -191,23 +158,113 @@ class PredictNet(nn.Module):
         z = z.view(-1, self.latent_dim, self.labels_num)
         z = z.gather(2, a_latent).squeeze(2)
 
-        x = self.decoder(z)
+        d = self.disc(z)
 
         mu = mu.view(-1, self.latent_dim, self.labels_num)
         std = std.view(-1, self.latent_dim, self.labels_num)
 
         # calculate the kl loss
-        kl_forget = (torch.log(self.std_forget / std) +
-              (std ** 2 + (mu - self.mu_forget) ** 2) / (2 * self.std_forget ** 2) - 0.5).sum(dim=1)
+        kl = (torch.log(self.std_prior / std) +
+              (std ** 2 + (mu - self.mu_prior) ** 2) / (2 * self.std_prior ** 2) - 0.5).sum(dim=1)
 
-        kl_learn = (torch.log(self.std_learn / std) +
-              (std ** 2 + (mu - self.mu_learn) ** 2) / (2 * self.std_learn ** 2) - 0.5).sum(dim=1)
+        return d, mu, std, kl.sum(dim=1)
 
-        kl_forget_y = kl_forget.gather(1, a).squeeze(1)
-        kl_learn_y = kl_learn.gather(1, a).squeeze(1)
 
-        kl = kl_forget.sum(dim=1) - kl_forget_y + kl_learn_y
-
-        x.view(s_shape)
-
-        return x, mu, std, kl
+# class PredictNet(nn.Module):
+#
+#     def __init__(self):
+#
+#         super(PredictNet, self).__init__()
+#
+#         self.latent_dim = args.latent
+#         self.labels_num = action_space
+#
+#         self.encoder = nn.Sequential(
+#             nn.Linear(3136, 512, bias=set_bias),
+#             activation(),
+#             nn.Linear(512, 512, bias=set_bias),
+#         )
+#
+#         self.mu = nn.Linear(512, self.latent_dim * self.labels_num, bias=set_bias)
+#         self.rho = nn.Linear(512, self.latent_dim * self.labels_num, bias=set_bias)
+#         self.var_layer = VarLayer()
+#
+#         self.decoder = nn.Sequential(
+#             nn.Linear(self.latent_dim, 512, bias=set_bias),
+#             activation(),
+#             nn.Linear(512, 512, bias=set_bias),
+#             activation(),
+#             nn.Linear(512, 3136, bias=set_bias),
+#         )
+#
+#         self.std_forget = 1
+#         self.mu_forget = -1
+#
+#         self.std_learn = 1
+#         self.mu_learn = 1
+#
+#         self.gen_mu = {'learn': self.mu_learn, 'forget': self.mu_forget, 'avg': -0.5, }
+#         self.gen_std = {'learn': self.std_learn, 'forget': self.std_forget, 'avg': 1, }
+#
+#     def gen_samples(self, batch, source='learn'):
+#
+#         mu = self.gen_mu[source]
+#         std = self.gen_std[source]
+#
+#         mu = torch.cuda.FloatTensor(batch, self.latent_dim).fill_(mu)
+#         std = torch.cuda.FloatTensor(batch, self.latent_dim).fill_(std)
+#
+#         z = self.var_layer(mu, std)
+#
+#         # decode from latent variable y_hat
+#         x = self.decoder(z)
+#
+#         return x
+#
+#     def forward(self, s, a=None):
+#
+#         s_shape = s.shape
+#         s = self.encoder(s)
+#
+#         mu = self.mu(s)
+#         rho = self.rho(s)
+#         std = torch.log1p(torch.exp(rho))
+#
+#         if a is None:
+#             kl = (torch.log(self.std_forget / std) +
+#               (std ** 2 + (mu - self.mu_forget) ** 2) / (2 * self.std_forget ** 2) - 0.5).sum(dim=1)
+#
+#             mu = mu.view(-1, self.latent_dim, self.labels_num)
+#             std = std.view(-1, self.latent_dim, self.labels_num)
+#
+#             return mu, std, kl
+#
+#         a = a.unsqueeze(1)
+#         a_latent = a.unsqueeze(2).repeat(1, self.latent_dim, 1)
+#
+#         z = self.var_layer(mu, std)
+#
+#         # attention
+#         z = z.view(-1, self.latent_dim, self.labels_num)
+#         z = z.gather(2, a_latent).squeeze(2)
+#
+#         x = self.decoder(z)
+#
+#         mu = mu.view(-1, self.latent_dim, self.labels_num)
+#         std = std.view(-1, self.latent_dim, self.labels_num)
+#
+#         # calculate the kl loss
+#         kl_forget = (torch.log(self.std_forget / std) +
+#               (std ** 2 + (mu - self.mu_forget) ** 2) / (2 * self.std_forget ** 2) - 0.5).sum(dim=1)
+#
+#         kl_learn = (torch.log(self.std_learn / std) +
+#               (std ** 2 + (mu - self.mu_learn) ** 2) / (2 * self.std_learn ** 2) - 0.5).sum(dim=1)
+#
+#         kl_forget_y = kl_forget.gather(1, a).squeeze(1)
+#         kl_learn_y = kl_learn.gather(1, a).squeeze(1)
+#
+#         kl = kl_forget.sum(dim=1) - kl_forget_y + kl_learn_y
+#
+#         x.view(s_shape)
+#
+#         return x, mu, std, kl
