@@ -19,6 +19,7 @@ import os
 import time
 import math
 from stm import STM
+import pandas as pd
 
 imcompress = cv2.IMWRITE_PNG_COMPRESSION
 compress_level = 2
@@ -27,10 +28,10 @@ mem_threshold = consts.mem_threshold
 
 class ApeAgent(Agent):
 
-    def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
+    def __init__(self, root_dir, player=False, choose=False, data_dir=None):
 
-        print("Learning with Ape Agent")
-        super(ApeAgent, self).__init__(root_dir, checkpoint, player)
+        print("Learning with STM-Ape Agent")
+        super(ApeAgent, self).__init__(root_dir, data_dir, player)
 
         self.value_net = DuelNet()
         self.target_net = DuelNet()
@@ -49,6 +50,7 @@ class ApeAgent(Agent):
         self.pi_rand_batch = torch.FloatTensor(self.pi_rand).unsqueeze(0).repeat(self.batch, 1).to(self.device)
 
         self.q_loss = nn.SmoothL1Loss(reduction='none')
+        self.tde_quantile_threshold = 0.9
 
         if player:
 
@@ -128,13 +130,13 @@ class ApeAgent(Agent):
             s_tag = sample['s_tag'].to(self.device)
             tde = sample['tde'].to(self.device)
 
-            _, _, _, q_tag_eval, _ = self.value_net(s_tag, a, self.pi_rand_batch)
+            _, _, _, q_tag_eval, _, _ = self.value_net(s_tag, a, self.pi_rand_batch)
             q_tag_eval = q_tag_eval.detach()
 
-            _, _, _, q_tag_target, _ = self.target_net(s_tag, a, self.pi_rand_batch)
+            _, _, _, q_tag_target, _, _ = self.target_net(s_tag, a, self.pi_rand_batch)
             q_tag_target = q_tag_target.detach()
 
-            _, _, _, q, q_a = self.value_net(s, a, self.pi_rand_batch)
+            _, _, _, q, q_a, _ = self.value_net(s, a, self.pi_rand_batch)
 
             a_tag = torch.argmax(q_tag_eval, dim=1).unsqueeze(1)
             r = h_torch(r + self.discount ** self.n_steps * (1 - t) * hinv_torch(q_tag_target.gather(1, a_tag).squeeze(1)))
@@ -181,7 +183,7 @@ class ApeAgent(Agent):
 
                 if not n % self.update_memory_interval:
                     # save agent state
-                    self.save_checkpoint(self.snapshot_path, {'n': self.n_offset + n + 1})
+                    self.save_checkpoint(self.snapshot_path, {'n': n})
 
                 if not n % self.update_target_interval:
                     # save agent state
@@ -210,6 +212,24 @@ class ApeAgent(Agent):
 
         for i in range(n_tot):
 
+            # load most recent stm model
+            if self.eval_stm:
+
+                while True:
+                    try:
+                        df = pd.DataFrame([(fo, os.path.getmtime(os.path.join(self.stm_dir, fo)))
+                                           for fo in os.listdir(self.stm_dir)], columns=['name', 'time'])
+
+                        checkpoint_stm = df['name'][df['time'].idxmax()]
+                        self.stm.load_checkpoint(os.path.join(self.stm_dir, checkpoint_stm))
+                        stm_statistics = {'fetch': 0, 'learn': 0}
+                        break
+                    except:
+                        time.sleep(0.5)
+
+            else:
+                stm_statistics = {}
+
             self.env.reset()
 
             rewards = [[]]
@@ -236,10 +256,16 @@ class ApeAgent(Agent):
                     self.value_net.eval()
 
                 s = self.env.s.to(self.device)
-                a_stm = int(self.stm.fetch_gate(s)[0])
 
                 # get aux data
-                _, _, _, q, _ = self.value_net(s, self.a_zeros, pi_rand)
+                _, _, _, q, _, _ = self.value_net(s, self.a_zeros, pi_rand)
+
+                if self.eval_stm:
+                    _, _, _, q_target, _, phi = self.target_net(s, self.a_zeros, pi_rand)
+
+                    phi = phi.detach()
+                    a_stm = int(self.stm.fetch_gate(phi)[0])
+                    q_target = q_target.squeeze(0).data.cpu().numpy()
 
                 q = q.squeeze(0).data.cpu().numpy()
 
@@ -258,7 +284,15 @@ class ApeAgent(Agent):
                 pi_mix = pi_mix / pi_mix.sum()
                 a = np.random.choice(self.choices, p=pi_mix)
 
-                a = a if a_stm < 0 else a_stm
+                if self.eval_stm:
+
+                    # if q.argmax() != q_target.argmax():
+
+                    if self.stm_enable and a_stm >= 0:
+                        a = a_stm
+                        stm_statistics['fetch'] += 1
+
+
                 self.env.step(a)
 
                 if self.env.k >= self.history_length:
@@ -275,7 +309,10 @@ class ApeAgent(Agent):
             mc_val = get_mc_value(rewards, None, self.discount, None)
             q_val = np.array(q_val)
 
-            yield {'score': self.env.score,
+            if self.eval_stm:
+                stm_statistics['fetch'] /= self.env.k
+
+            yield {'score': self.env.score, 'stm_statistics': stm_statistics,
                    'frames': self.env.k, "n": self.n_offset, "mc": mc_val, "q": q_val}
 
             if self.n_offset >= self.n_tot and not fix:
@@ -283,13 +320,12 @@ class ApeAgent(Agent):
 
         raise StopIteration
 
-
     def multiplay(self):
 
         n_players = self.n_players
 
         player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
-        mp_explore = 0.4 ** (1 + 7 * player_i)
+        mp_explore = 0.4 ** (1 + 7 * (1 - player_i))
         explore_threshold = player_i
 
         mp_env = [Env() for _ in range(n_players)]
@@ -304,11 +340,17 @@ class ApeAgent(Agent):
         q_a = [[] for _ in range(n_players)]
         image_dir = ['' for _ in range(n_players)]
         trajectory = [[] for _ in range(n_players)]
-        tde_track = [np.zeros(1) for _ in range(n_players)]
-        stm_queue = []
-        stm_action_queue = []
-        s_fifo = [None] * self.n_steps
-        tde_quantile = 0
+
+        gate_statistics = [{'fetch': 0, 'learn': 0, 'forget': 0, 'pool': 0, 'score': 0, 'frames': 0} for _ in range(n_players)]
+        track_gate_statistics = [[] for _ in range(n_players)]
+        track_stm_statistics = []
+
+        s_fifo = [[] for _ in range(n_players)]
+        a_fifo = [[] for _ in range(n_players)]
+
+        learn_th = np.inf
+        forget_th = -np.inf
+
 
         screen_dir = [os.path.join(self.explore_dir, "screen")] * n_players
         trajectory_dir = [os.path.join(self.explore_dir, "trajectory")] * n_players
@@ -344,11 +386,15 @@ class ApeAgent(Agent):
                 self.value_net.eval()
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
-            a_stm = self.stm.fetch_gate(s)
 
-            _, _, _, q, _ = self.value_net(s, a_zeros_mp, pi_rand_batch)
+            _, _, _, q, _, _ = self.value_net(s, a_zeros_mp, pi_rand_batch)
+            _, _, _, q_target, _, phi = self.target_net(s, a_zeros_mp, pi_rand_batch)
+
+            phi = phi.detach()
+            a_stm = self.stm.fetch_gate(phi)
 
             q = q.data.cpu().numpy()
+            q_target = q_target.data.cpu().numpy()
 
             mp_trigger = np.logical_and(
                 np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
@@ -381,7 +427,18 @@ class ApeAgent(Agent):
                                             episode_num[i], 0., 0, 0,
                                             0., 1., 1., 0, 1., 0), dtype=self.rec_type))
 
-                a = a if a_stm[i] < 0 else a_stm[i]
+                if q[i].argmax() != q_target[i].argmax():
+
+                    # learn gate
+                    s_fifo[i].append(phi[i])
+                    a_fifo[i].append(a)
+
+                # fetch gate
+                if self.stm_enable and a_stm[i] >= 0 and mp_trigger[i] and \
+                    4 * (self.n_offset >= self.random_initialization):
+                # if self.stm_enable and a_stm[i] >= 0:
+                    a = a_stm[i]
+                    gate_statistics[i]['fetch'] += 1
 
                 env.step(a)
 
@@ -394,14 +451,6 @@ class ApeAgent(Agent):
                 v_target[i][-1].append(v_expected[i])
                 q_a[i].append(q[i][a])
 
-                if len(q_a[i]) > self.n_steps:
-                    self.stm.learn_gate(q_a[i][-self.n_steps-1], rewards[i][-self.n_steps-1:-2], v_target[i][-self.n_steps], v_target[i][-1], tde_quantile)
-
-
-                # add to fifo
-                s_fifo.pop(0)
-                s_fifo.append(s)
-
                 if env.t:
 
                     td_val, t_val = get_tde_value(rewards[i], self.discount, self.n_steps)
@@ -410,10 +459,6 @@ class ApeAgent(Agent):
                     v_scale = np.concatenate(v_target[i])
                     # compute a signed version of tde
                     tde = np.sign(tde) * np.minimum(np.abs(tde), np.abs(tde / v_scale))
-
-                    # add
-                    tde_track[i] = tde
-                    tde_quantile = np.quantile(np.concatenate(tde_track), 0.9)
 
                     # add absolute value and squashing
                     tde = np.abs(tde) ** self.priority_alpha
@@ -425,16 +470,60 @@ class ApeAgent(Agent):
 
                     trajectory[i].append(episode_df)
 
-                    print("ape | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g" %
+                    # enter important episodes into stm
+                    # if env.score >= self.behavioral_avg_score and self.behavioral_avg_score > 0 and len(s_fifo[i]):
+                    #     self.stm.fifo_add_batch(torch.stack(s_fifo[i]),
+                    #                             torch.cuda.LongTensor(a_fifo[i]), target='learn')
+                    #     gate_statistics[i]['learn'] = 1
+                    #
+                    # elif np.random.rand() > self.tde_quantile_threshold and len(s_fifo[i]):
+                    #     self.stm.fifo_add_batch(torch.stack(s_fifo[i]),
+                    #                             torch.cuda.LongTensor(a_fifo[i]), target='forget')
+                    #     gate_statistics[i]['forget'] = 1
+
+                    if env.score >= learn_th and len(s_fifo[i]):
+                        self.stm.fifo_add_batch(torch.stack(s_fifo[i]),
+                                                torch.cuda.LongTensor(a_fifo[i]), target='learn')
+                        gate_statistics[i]['learn'] = 1
+
+                    elif env.score < forget_th and len(s_fifo[i]):
+                        self.stm.fifo_add_batch(torch.stack(s_fifo[i]),
+                                                torch.cuda.LongTensor(a_fifo[i]), target='forget')
+                        gate_statistics[i]['forget'] = 1
+
+                    new_stat = self.stm.load_stat()
+                    if new_stat:
+                        track_stm_statistics.append(new_stat)
+
+                    gate_statistics[i]['pool'] = len(a_fifo[i]) / float(env.k)
+                    gate_statistics[i]['score'] = float(env.score)
+                    gate_statistics[i]['frames'] = float(env.k)
+                    gate_statistics[i]['fetch'] /=  float(env.k)
+
+                    print("ape | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g\t| learn_th: %g\t| forget_th: %g" %
                         (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), mp_trigger[i],
                          time.time() - self.start_time, self.n_offset, self.behavioral_avg_score,
-                         self.behavioral_avg_frame))
+                         self.behavioral_avg_frame, learn_th, forget_th))
+
+                    stm_stat_string = "stm_stat | fetch: %g\t| learn: %g\t|" % \
+                          (gate_statistics[i]['fetch'],
+                           gate_statistics[i]['learn'])
+
+                    track_gate_statistics[i].append(gate_statistics[i])
+
+                    # for stat in self.stm.statistics:
+                    #     stm_stat_string += " %s: %g\t|" % (stat, self.stm.statistics[stat])
+
+                    print(stm_stat_string)
 
                     env.reset()
                     episode[i] = []
                     q_a[i] = []
+                    s_fifo[i] = []
+                    a_fifo[i] = []
                     rewards[i] = [[]]
                     v_target[i] = [[]]
+                    gate_statistics[i] = {'fetch': 0, 'learn': 0, 'forget': 0, 'pool': 0, 'score': 0, 'frames': 0}
                     lives[i] = env.lives
 
                     # get new episode number
@@ -478,8 +567,41 @@ class ApeAgent(Agent):
                         trajectory[i] = []
 
             self.frame += 1
+            
             if not self.frame % self.player_replay_size:
-                yield True
+
+                # save stm network
+                self.stm.save_checkpoint(self.stm_checkpoint)
+
+                stm_stats = pd.DataFrame(track_stm_statistics)
+                stm_stats = dict(stm_stats.mean())
+                stm_stats['rounds'] = len(track_stm_statistics)
+
+                all_scores = []
+
+                all_player_stats = {}
+                for j in range(n_players):
+                    player_stats = pd.DataFrame(track_gate_statistics[j])
+
+                    if len(player_stats):
+                        all_scores.append(player_stats['score'])
+
+                    player_stats = dict(player_stats.mean())
+                    player_stats['epochs'] = len(track_gate_statistics[j])
+                    all_player_stats['p_%.2g_%.2g' % (mp_explore[j], player_i[j])] = player_stats
+
+
+                # find new threshold for learn and forget gates
+
+                all_scores = np.concatenate(all_scores)
+                learn_th = np.quantile(all_scores, 0.8)
+                forget_th = np.quantile(all_scores, 0.3)
+
+                yield stm_stats, all_player_stats
+
+                track_stm_statistics = []
+                track_gate_statistics = [[] for _ in range(n_players)]
+                self.global_threshold_score = max(self.global_threshold_score, self.behavioral_avg_score)
 
             if self.n_offset >= self.n_tot:
                 break
@@ -499,7 +621,7 @@ class ApeAgent(Agent):
             while not self.env.t:
 
                 s = self.env.s.to(self.device)
-                _, _, _, q, _ = self.value_net(s, self.a_zeros, pi_rand)
+                _, _, _, q, _, _ = self.value_net(s, self.a_zeros, pi_rand)
 
                 q = q.squeeze(0).data.cpu().numpy()
 

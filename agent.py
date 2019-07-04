@@ -9,7 +9,7 @@ import itertools
 
 class Agent(object):
 
-    def __init__(self, root_dir, checkpoint=None, player=False):
+    def __init__(self, root_dir, data_dir=None, player=False):
         # parameters
         self.discount = args.discount
         self.update_target_interval = args.update_target_interval
@@ -34,6 +34,7 @@ class Agent(object):
         self.cuda_id = args.cuda_default
         self.behavioral_avg_frame = 1
         self.behavioral_avg_score = -1
+        self.global_threshold_score = self.behavioral_avg_score
         self.entropy_loss = float((1 - (1 / (1 + (self.action_space - 1) * np.exp(-args.softmax_diff)))) * (self.action_space / (self.action_space - 1)))
         self.batch = args.batch
         self.stm_batch = args.stm_batch
@@ -43,9 +44,12 @@ class Agent(object):
         self.n_players = args.n_players
         self.player = args.player
         self.n_tot = args.n_tot
+        self.stm_enable = args.stm
         self.max_length = consts.max_length[args.game]
         self.max_score = consts.max_score[args.game]
         self.start_time = consts.start_time
+        self.clip = args.clip
+        self.eval_stm = args.eval_stm
 
         self.mix = self.delta
         self.min_loop = 1. / 44
@@ -60,7 +64,7 @@ class Agent(object):
 
         self.rec_type = consts.rec_type
 
-        self.checkpoint = checkpoint
+        self.data_dir = data_dir
         self.root_dir = root_dir
         self.best_player_dir = os.path.join(root_dir, "best")
         self.snapshot_path = os.path.join(root_dir, "snapshot")
@@ -76,6 +80,14 @@ class Agent(object):
             self.trajectory_dir = os.path.join(self.explore_dir, "trajectory")
             self.screen_dir = os.path.join(self.explore_dir, "screen")
             self.readlock = os.path.join(self.list_dir, "readlock_explore.npy")
+
+            # stm compatibility
+            self.stm_dir = os.path.join(self.data_dir, "stm")
+            if not os.path.isdir(self.stm_dir):
+                os.mkdir(self.stm_dir)
+
+            self.stm_checkpoint = os.path.join(self.stm_dir, "checkpoint_%d" % self.actor_index)
+
         else:
             try:
                 os.mkdir(self.best_player_dir)
