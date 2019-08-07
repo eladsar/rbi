@@ -26,10 +26,10 @@ mem_threshold = consts.mem_threshold
 
 class RBIAgent(Agent):
 
-    def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
+    def __init__(self, root_dir, player=False, choose=False, data_dir=None):
 
         print("Learning with RBIAgent")
-        super(RBIAgent, self).__init__(root_dir, checkpoint, player)
+        super(RBIAgent, self).__init__(root_dir, data_dir, player)
 
         self.beta_net = BehavioralNet()
         self.value_net = DuelNet()

@@ -25,10 +25,10 @@ mem_threshold = consts.mem_threshold
 
 class ApeAgent(Agent):
 
-    def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
+    def __init__(self, root_dir, player=False, choose=False, data_dir=None):
 
         print("Learning with Ape Agent")
-        super(ApeAgent, self).__init__(root_dir, checkpoint, player)
+        super(ApeAgent, self).__init__(root_dir, data_dir, player)
 
         self.value_net = DuelNet()
         self.target_net = DuelNet()

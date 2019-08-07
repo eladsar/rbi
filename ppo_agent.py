@@ -28,7 +28,7 @@ mem_threshold = consts.mem_threshold
 
 class PPOAgent(Agent):
 
-    def __init__(self, root_dir, player=False, choose=False, checkpoint=None):
+    def __init__(self, root_dir, player=False, choose=False, data_dir=None):
 
         print("Learning with RBIAgent")
         super(PPOAgent, self).__init__(root_dir, checkpoint)

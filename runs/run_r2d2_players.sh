@@ -37,4 +37,4 @@ CUDA_VISIBLE_DEVICES=3, python $loc/main.py --multiplay --algorithm=r2d2 --ident
 
 CUDA_VISIBLE_DEVICES=0, python $loc/main.py --clean --algorithm=r2d2 --identifier=$identifier --resume=$resume --load-last-model --game=$game &
 CUDA_VISIBLE_DEVICES=2, python $loc/main.py --evaluate --algorithm=r2d2 --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --play-episodes-interval=16 --wait=150 $args  &
-CUDA_VISIBLE_DEVICES=3, python $loc/main.py --evaluate --algorithm=r2d2 --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --play-episodes-interval=16 --wait=300 $args  &
+CUDA_VISIBLE_DEVICES=3, python $loc/main.py --evaluate --algorithm=r2d2 --identifier=$identifier --resume=$resume --load-last-model --game=$game --cuda-default=0 --play-episodes-interval=16 $args  &

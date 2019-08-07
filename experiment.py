@@ -17,6 +17,7 @@ from rbi_rnn_agent import RBIRNNAgent
 
 from logger import logger
 from distutils.dir_util import copy_tree
+import pandas as pd
 
 
 class Experiment(object):
@@ -132,7 +133,7 @@ class Experiment(object):
 
         # init time variables
 
-        agent = self.choose_agent()(self.replay_dir, checkpoint=self.checkpoint)
+        agent = self.choose_agent()(self.replay_dir, data_dir=self.root)
 
         # load model
         if self.load_model:
@@ -246,10 +247,19 @@ class Experiment(object):
 
     def multiplay(self):
 
-        agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint)
+        agent = self.choose_agent()(self.replay_dir, player=True, data_dir=self.root)
         multiplayer = agent.multiplay()
 
-        for _ in multiplayer:
+        for stm_stats, all_player_stats in multiplayer:
+
+            if args.tensorboard and args.eval_stm:
+                for c in stm_stats:
+                    self.writer.add_scalar('stm/%s' % c, float(stm_stats[c]), agent.n_offset)
+
+                for player_name, player_stats in all_player_stats.items():
+
+                    for c in player_stats:
+                        self.writer.add_scalar(f'{player_name}/{c}', float(player_stats[c]), agent.n_offset)
 
             player = self.get_player(agent)
             if player:
@@ -259,7 +269,7 @@ class Experiment(object):
     def play(self, params=None):
 
         uuid = "%012d" % np.random.randint(1e12)
-        agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint)
+        agent = self.choose_agent()(self.replay_dir, player=True, data_dir=self.root)
         aux = agent.resume(self.checkpoint)
 
         n = aux['n']
@@ -279,13 +289,13 @@ class Experiment(object):
 
     def clean(self):
 
-        agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint, choose=True)
+        agent = self.choose_agent()(self.replay_dir, player=True, data_dir=self.root, choose=True)
         agent.clean()
 
     def evaluate(self):
 
         uuid = "%012d" % np.random.randint(1e12)
-        agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint, choose=True)
+        agent = self.choose_agent()(self.replay_dir, player=True, data_dir=self.root, choose=True)
 
         best_score = -np.inf
 
@@ -359,7 +369,7 @@ class Experiment(object):
 
                 player = agent.play(args.play_episodes_interval, save=False, load=False)
 
-                stats = {"score": [], "frame": [], "time": [], "n": []}
+                stats = {"score": [], "frame": [], "time": [], "n": [], 'stm_statistics': []}
 
                 tic = time.time()
 
@@ -376,6 +386,7 @@ class Experiment(object):
                     stats["score"].append(step['score'])
                     stats["frame"].append(step['frames'])
                     stats["n"].append(step['n'])
+                    stats["stm_statistics"].append(step['stm_statistics'])
                     stats["time"].append(time.time() - consts.start_time)
 
                 # random selection
@@ -392,6 +403,8 @@ class Experiment(object):
                 player_params['frames'] = np.percentile(frames, 90)
                 player_params['high'] = np.percentile(scores, 90)
 
+                stm_statistics = pd.DataFrame(stats["stm_statistics"])
+
                 # save best player checkpoint
                 if player_name != "behavioral" and score.mean() > best_score:
                     best_score = score.mean()
@@ -405,18 +418,24 @@ class Experiment(object):
                     self.writer.add_scalar('std/%s' % player_name, float(score.std()), n)
                     self.writer.add_scalar('frames/%s' % player_name, float(frames.mean()), n)
 
+                    for c in stm_statistics.columns:
+                        self.writer.add_scalar('/stm/%s/%s' % (c, player_name), float(stm_statistics[c].mean()), n)
+
                     try:
                         self.writer.add_histogram("mc/%s" % player_name, mc, n, 'fd')
                         self.writer.add_histogram("q/%s" % player_name, q, n, 'fd')
                     except:
                         pass
 
-                np.save(results_filename, results)
+                # avoid using data with stm-evaluation player
 
-                if self.log_scores:
-                    logger.info("Save NPY file: %d_%s_%d_%s.npy" % (n, uuid, kk, player_name))
-                    stat_filename = os.path.join(scores_dir, "%d_%s_%d_%s" % (n, uuid, kk, player_name))
-                    np.save(stat_filename, stats)
+                if not args.eval_stm:
+
+                    np.save(results_filename, results)
+                    if self.log_scores:
+                        logger.info("Save NPY file: %d_%s_%d_%s.npy" % (n, uuid, kk, player_name))
+                        stat_filename = os.path.join(scores_dir, "%d_%s_%d_%s" % (n, uuid, kk, player_name))
+                        np.save(stat_filename, stats)
 
                 kk += 1
 
@@ -561,7 +580,7 @@ class Experiment(object):
 
     def demonstrate(self, params=None):
 
-        agent = self.choose_agent()(self.replay_dir, player=True, checkpoint=self.checkpoint)
+        agent = self.choose_agent()(self.replay_dir, player=True, data_dir=self.root)
 
         # load model
         try:

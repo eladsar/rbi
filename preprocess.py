@@ -379,6 +379,18 @@ def lock_file(file):
     return fo
 
 
+def increment_file(path):
+
+    fwrite = lock_file(path)
+    n = np.load(fwrite).item()
+    fwrite.seek(0)
+    np.save(fwrite, n + 1)
+    # unlock file
+    release_file(fwrite)
+
+    return n
+
+
 def release_file(fo):
     fcntl.lockf(fo, fcntl.LOCK_UN)
     fo.close()
