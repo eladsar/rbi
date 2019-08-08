@@ -19,6 +19,8 @@ class Agent(object):
         self.skip = args.skip
         self.termination_reward = args.termination_reward
         self.n_steps = args.n_steps
+        self.n_stm = args.n_stm
+        self.stm_pool = args.stm_pool
         self.reward_shape = args.reward_shape
         self.player_replay_size = args.player_replay_size
         self.cmin = args.cmin
@@ -50,6 +52,7 @@ class Agent(object):
         self.start_time = consts.start_time
         self.clip = args.clip
         self.eval_stm = args.eval_stm
+        self.latent_dim = args.latent
 
         self.mix = self.delta
         self.min_loop = 1. / 44
