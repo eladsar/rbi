@@ -1,4 +1,4 @@
-from model_stm import PolicyNet, PredictNet, PolicyNet2
+from model_stm import PolicyNet, PredictNet, PolicyNet2, PolicyDet2, PolicyConv2
 import torch
 import torch.utils.data
 import torch.utils.data.sampler
@@ -16,6 +16,8 @@ import os
 import time
 import math
 import itertools
+
+STMNet = PolicyNet2
 
 
 class PASGD(Optimizer):
@@ -198,8 +200,8 @@ class Fifo(object):
     def __init__(self, length, size):
         self.length = length
         self.size = size
-        self.x = torch.cuda.FloatTensor([])
-        self.y = torch.cuda.LongTensor([])
+        self.x = torch.FloatTensor([])
+        self.y = torch.LongTensor([])
 
     def push(self, x, y):
 
@@ -253,7 +255,7 @@ class STM(object):
         self.labels_num = len(np.nonzero(consts.actions[args.game])[0])
 
         self.add_labels = 1
-        self.net = PolicyNet2(add=1)
+        self.net = STMNet(add=1)
 
         if torch.cuda.device_count() > 1:
             self.net = nn.DataParallel(self.net)
@@ -263,23 +265,22 @@ class STM(object):
         self.net.train()
 
         self.optimizer = PASGD(self.net.parameters(), lr=0.00025/4, momentum=0.9, weight_decay=0,
-                               nesterov=True, friction=0., punctuation=1,
+                               nesterov=True, friction=0., punctuation=1.,
                                warm_start=args.warm_start)
 
         self.loss_classification = nn.CrossEntropyLoss(reduction='none')
 
-        self.mu_base_net = 10
+        self.mu_base_net = 1
         self.lagrange_base_net = 1
         self.batch = args.stm_batch
 
-        self.learn_queue = torch.cuda.FloatTensor([])
-        self.forget_queue = torch.cuda.FloatTensor([])
-        self.action_queue = torch.cuda.LongTensor([])
-        self.action_forget_queue = torch.cuda.LongTensor([])
+        self.learn_queue = []
+        self.forget_queue = []
+        self.action_queue = []
+        self.action_forget_queue = []
 
         self.beta_net = 1
         self.th = -math.log(args.pa_threshold)
-        self.disc_th = 0.8
 
         self.n_iter = args.n_iter
         self.current_n_iter = 0
@@ -361,10 +362,7 @@ class STM(object):
         a_hat = torch.softmax(a_hat, dim=1).detach()
 
         a_prob, a_ind = torch.max(a_hat[:, :self.labels_num], dim=1)
-        disc = (a_prob > self.disc_th).float()
-        prob = a_prob * disc
-
-        return a_ind, prob
+        return a_ind, a_prob
 
     def load_stat(self):
         if self.statistics:
@@ -377,51 +375,54 @@ class STM(object):
     def add_batch(self, s, a, target='learn'):
 
         if target == 'learn':
-            self.learn_queue = torch.cat([self.learn_queue, s])[-self.batch:]
-            self.action_queue = torch.cat([self.action_queue, a])[-self.batch:]
-
-            if len(self.learn_queue) >= self.batch and len(self.forget_queue) >= self.batch:
-                sample_learn = {'x_train': self.learn_queue, 'y_train': self.action_queue}
-                sample_forget = {'x_forget': self.forget_queue, 'y_forget': self.action_forget_queue}
-                self.learn(sample_learn, sample_forget)
-
-                self.learn_queue = torch.cuda.FloatTensor([])
-                self.forget_queue = torch.cuda.FloatTensor([])
-                self.action_queue = torch.cuda.LongTensor([])
-                self.action_forget_queue = torch.cuda.LongTensor([])
+            self.learn_queue.append(s)
+            self.action_queue.append(a)
+            self.learn_queue = self.learn_queue[-self.batch:]
+            self.action_queue = self.action_queue[-self.batch:]
 
         elif target == 'forget':
-            self.forget_queue = torch.cat([self.forget_queue, s])[-self.batch:]
-            self.action_forget_queue = torch.cat([self.action_forget_queue, a])[-self.batch:]
+            self.forget_queue.append(s)
+            self.action_forget_queue.append(a)
+            self.forget_queue = self.forget_queue[-self.batch:]
+            self.action_forget_queue = self.action_forget_queue[-self.batch:]
 
         else:
             raise NotImplementedError
 
+        if len(self.learn_queue) >= self.batch and len(self.forget_queue) >= self.batch:
+            sample_learn = {'x_train': torch.stack(self.learn_queue),
+                            'y_train': torch.cat(self.action_queue)}
+            sample_forget = {'x_forget': torch.stack(self.forget_queue),
+                             'y_forget': torch.cat(self.action_forget_queue)}
+            self.learn(sample_learn, sample_forget)
+
+            self.learn_queue = []
+            self.action_queue = []
+            self.forget_queue = []
+            self.action_forget_queue = []
+
     def learn(self, sample_learn, sample_forget):
 
         # Policy part
+
+        fifo_learn = self.fifo_learn.push2(sample_learn['x_train'], sample_learn['y_train'])
+        fifo_forget = self.fifo_forget.push2(sample_forget['x_forget'], sample_forget['y_forget'])
+
+        if fifo_learn is None:
+            return
+
         x_train = sample_learn['x_train'].to(self.device)
         y_train = sample_learn['y_train'].to(self.device)
+        x_forget = sample_forget['x_forget'].to(self.device)
+        x_keep = fifo_learn['x_keep'].to(self.device)
+        y_keep = fifo_learn['y_keep'].to(self.device)
+        x_forget2 = fifo_forget['x_keep'].to(self.device)
 
         batch = len(x_train)
-
-        sample_learn = self.fifo_learn.push2(x_train, y_train)
-
-        x_forget = sample_forget['x_forget'].to(self.device)
-        y_forget = sample_forget['y_forget'].to(self.device)
-        sample_forget = self.fifo_forget.push2(x_forget, y_forget)
-
-        if sample_learn is None:
-            return
 
         self.net.train()
         self.statistics = {}
         self.optimizer.snapshot()
-
-        x_keep = sample_learn['x_keep']
-        y_keep = sample_learn['y_keep']
-
-        x_forget2 = sample_forget['x_keep']
 
         y_forget = torch.cuda.LongTensor(len(x_forget)).fill_(self.labels_num)
         y_forget2 = torch.cuda.LongTensor(len(x_forget2)).fill_(self.labels_num)
@@ -432,7 +433,7 @@ class STM(object):
         x_forget = torch.cat([x_forget, x_forget2])
         y_forget = torch.cat([y_forget, y_forget2])
 
-        n_objectives = len(x_train) + len(x_forget)
+        n_objectives = len(x_train)
         lagrange_net = torch.cuda.FloatTensor(n_objectives).fill_(self.lagrange_base_net)
         mu_net = torch.cuda.FloatTensor(n_objectives).fill_(self.mu_base_net)
 
@@ -445,12 +446,19 @@ class STM(object):
             objective_forget = self.loss_classification(y_forget_est, y_forget)
 
             kl = torch.cat([kl_train, kl_forget])
-            objective = torch.cat([objective, objective_forget])
+            # objective = torch.cat([objective, objective_forget])
 
-            f_min = self.beta_net * kl.sum()
+            f_min = self.beta_net * kl.sum() + objective_forget.sum()
 
             loss_classification = f_min + (0.5 * mu_net * objective ** 2 + lagrange_net * objective).sum()
             loss_classification /= batch
+
+            if n_iter == 1:
+                y_train_tag = torch.softmax(y_train_est, dim=1)
+                y_forget_tag = torch.softmax(y_forget_est, dim=1)
+                self.statistics['acc_pre'] = float((y_train == y_train_tag[:, :self.labels_num].argmax(dim=1)).float().mean())
+                self.statistics['disc_t_pre'] = float(y_train_tag[:, self.labels_num].mean())
+                self.statistics['disc_f_pre'] = float(y_forget_tag[:, self.labels_num].mean())
 
             if n_iter >= self.max_n_iter or ((objective.max() <= self.th) and n_iter > self.n_iter):
                 break

@@ -36,12 +36,14 @@ class ApeAgent(Agent):
         self.value_net = DuelNet()
         self.target_net = DuelNet()
 
+        self.target_net.to(self.device)
+        self.target_net.load_state_dict(self.value_net.state_dict())
+
         if torch.cuda.device_count() > 1:
             self.value_net = nn.DataParallel(self.value_net)
             self.target_net = nn.DataParallel(self.target_net)
 
         self.value_net.to(self.device)
-
 
         self.a_zeros = torch.zeros(1, 1).long().to(self.device)
 
@@ -65,8 +67,6 @@ class ApeAgent(Agent):
 
         else:
 
-            self.target_net.to(self.device)
-            self.target_net.load_state_dict(self.value_net.state_dict())
             # datasets
             self.train_dataset = Memory(root_dir)
             self.train_sampler = ReplayBatchSampler(root_dir)
@@ -326,12 +326,18 @@ class ApeAgent(Agent):
         n_players = self.n_players
 
         player_i = np.arange(self.actor_index, self.actor_index + self.n_actors * n_players, self.n_actors) / (self.n_actors * n_players - 1)
+
+        # player_i_stm = (self.n_actors - self.actor_index + np.arange(0, self.n_actors * n_players, self.n_actors)) / (self.n_actors * n_players - 1)
+        # player_i_stm = player_i_stm.reshape(4, 4).T.reshape(-1)
+
         player_i_stm = np.arange(16).reshape(4, 4).T.reshape(-1) / 16
 
         mp_explore = 0.4 ** (1 + 7 * (1 - player_i))
         mp_stm = 0.9 ** (1 + 9 * player_i_stm)
+        # mp_stm = 0.9 * player_i_stm
 
         explore_threshold = player_i
+        explore_stm_threshold = np.exp(-(1 - player_i_stm) * 5)
 
         mp_env = [Env() for _ in range(n_players)]
         self.frame = 0
@@ -345,21 +351,14 @@ class ApeAgent(Agent):
         q_a = [[] for _ in range(n_players)]
         image_dir = ['' for _ in range(n_players)]
         trajectory = [[] for _ in range(n_players)]
-        scores = [[] for _ in range(n_players)]
-        frames = [[300] for _ in range(n_players)]
-        s_fifo = [None] * (self.n_stm + 1 + self.history_length - 1)
+        s_fifo = [None] * (self.n_stm + 1)
 
-        gate_statistics = [{'fetch': 0, 'learn': 0, 'forget': 0, 'pool': 150, 'score': 0, 'frames': 0} for _ in range(n_players)]
+        gate_statistics = [{'fetch': 0, 'learn': 0, 'forget': 0, 'score': 0, 'frames': 0} for _ in range(n_players)]
         track_gate_statistics = [[] for _ in range(n_players)]
         track_stm_statistics = []
 
-        s_buffer = [[] for _ in range(n_players)]
-        s_buffer_forget = [[] for _ in range(n_players)]
-        a_buffer = [[] for _ in range(n_players)]
-
-        learn_th = np.inf
-        forget_th = -np.inf
-        exp_scale = 1
+        lambda_learn = 1
+        lambda_fetch = 1
 
         screen_dir = [os.path.join(self.explore_dir, "screen")] * n_players
         trajectory_dir = [os.path.join(self.explore_dir, "trajectory")] * n_players
@@ -390,19 +389,15 @@ class ApeAgent(Agent):
 
             s = torch.cat([env.s for env in mp_env]).to(self.device)
             # add to fifo
+            _, _, _, q_target, _, _ = self.target_net(s, a_zeros_mp, pi_rand_batch)
+            _, _, _, q, _, phi = self.value_net(s, a_zeros_mp, pi_rand_batch)
+
             s_fifo.pop(0)
-            # s_fifo.append(phi)
-            s_fifo.append([env.frame for env in mp_env])
-
-            _, _, _, q, _, _ = self.value_net(s, a_zeros_mp, pi_rand_batch)
-            # _, _, _, _, _, phi = self.target_net(s, a_zeros_mp, pi_rand_batch)
-
-            # phi = phi.detach()
-            # a_stm, prob_stm = self.stm.fetch_gate(phi)
-
-            a_stm, prob_stm = self.stm.fetch_gate(s)
+            s_fifo.append(phi.data.cpu())
+            a_stm, prob_stm = self.stm.fetch_gate(phi)
 
             q = q.data.cpu().numpy()
+            q_target = q_target.data.cpu().numpy()
 
             mp_trigger = np.logical_and(
                 np.array([env.score for env in mp_env]) >= self.behavioral_avg_score * explore_threshold,
@@ -436,8 +431,12 @@ class ApeAgent(Agent):
                                             0., 1., 1., 0, 1., 0), dtype=self.rec_type))
 
                 # fetch gate
-                if self.stm_enable and a_stm[i] >= 0 and 4 * (self.n_offset >= self.random_initialization) \
-                        and np.random.rand() < mp_stm[i] * prob_stm[i]:
+                # if self.stm_enable and a_stm[i] >= 0 and self.n_offset >= self.stm_start \
+                #         and np.random.rand() < mp_stm[i] * prob_stm[i] and prob_stm[i] > lambda_fetch and env.score >= self.behavioral_avg_score * explore_stm_threshold[i]:
+
+                if self.stm_enable and a_stm[i] >= 0 and self.n_offset >= self.stm_start \
+                            and np.random.rand() < mp_stm[i] and prob_stm[i] > lambda_fetch:
+
                     a = a_stm[i]
                     gate_statistics[i]['fetch'] += 1
 
@@ -452,33 +451,31 @@ class ApeAgent(Agent):
                 v_target[i][-1].append(v_expected[i])
                 q_a[i].append(q[i][a])
 
-                if len(rewards[i][-1]) > (self.n_stm + self.history_length):
+                if len(rewards[i][-1]) > max(self.n_stm, self.history_length):
 
                     rr = np.array(rewards[i][-1][-self.n_stm-1:-1])
                     rr = np.clip(rr, -self.clip, self.clip)
 
-                    target = np.sum(rr * self.discount ** np.arange(self.n_stm))
-                    target = target + self.discount ** self.n_stm * v_target[i][-1][-1]
+                    target = np.sum(rr * self.discount ** np.arange(self.n_stm)) + self.discount ** self.n_stm * v_target[i][-1][-1]
                     tde = target - q_a[i][-self.n_stm-1]
                     v_scale = v_target[i][-1][-self.n_stm-1]
 
-                    tde = np.clip(np.sign(tde) * np.minimum(np.abs(tde), np.abs(tde / v_scale)), a_min=0, a_max=None)
+                    scaled_tde = np.sign(tde) * np.minimum(np.abs(tde), np.abs(tde / v_scale))
+                    scaled_tde = scaled_tde ** self.priority_alpha
 
-                    # if tde > np.random.exponential(exp_scale):
-                    #     s_buffer[i].append(s_fifo[0][i])
-                    #     a_buffer[i].append(int(episode[i][-self.n_stm-1]['a']))
-                    #
-                    # if np.random.rand() > 0.5 and tde == 0:
-                    #     s_buffer_forget[i].append(s_fifo[0][i])
+                    learn_trigger = (q[i].argmax() != q_target[i].argmax()) or (int(a) != q[i].argmax())
 
-                    if tde > np.random.exponential(exp_scale):
-                        s_to_fetch = np.stack([s_fifo[self.history_length - j][i] for j in range(self.history_length)])
-                        s_buffer[i].append(torch.FloatTensor(s_to_fetch).to(self.device))
-                        a_buffer[i].append(int(episode[i][-self.n_stm-1]['a']))
+                    if learn_trigger and scaled_tde > 1/lambda_learn:
+                        self.stm.add_batch(s_fifo[0][i], torch.LongTensor([int(episode[i][-self.n_stm-1]['a'])]), target='learn')
+                        gate_statistics[i]['learn'] += 1
 
-                    if np.random.rand() > 0.5:
-                        s_to_fetch = np.stack([s_fifo[self.history_length - j][i] for j in range(self.history_length)])
-                        s_buffer_forget[i].append(torch.FloatTensor(s_to_fetch).to(self.device))
+                    if not learn_trigger and np.sign(tde) < 0:
+                        self.stm.add_batch(s_fifo[0][i], torch.LongTensor([int(episode[i][-self.n_stm-1]['a'])]), target='forget')
+                        gate_statistics[i]['forget'] += 1
+
+                    new_stat = self.stm.load_stat()
+                    if new_stat:
+                        track_stm_statistics.append(new_stat)
 
                 if env.t:
 
@@ -488,8 +485,6 @@ class ApeAgent(Agent):
                     v_scale = np.concatenate(v_target[i])
                     # compute a signed version of tde
                     tde = np.sign(tde) * np.minimum(np.abs(tde), np.abs(tde / v_scale))
-
-                    # add absolute value and squashing
                     tde = np.abs(tde) ** self.priority_alpha
 
                     episode_df = np.stack(episode[i][self.history_length - 1:self.max_length])
@@ -499,27 +494,20 @@ class ApeAgent(Agent):
 
                     trajectory[i].append(episode_df)
 
-                    if len(s_buffer[i]):
-                        self.stm.add_batch(torch.stack(s_buffer[i]), torch.cuda.LongTensor(a_buffer[i]), target='learn')
-                        gate_statistics[i]['learn'] = len(s_buffer[i])
-
-                    if len(s_buffer_forget[i]):
-                        self.stm.add_batch(torch.stack(s_buffer_forget[i]), torch.cuda.LongTensor(a_buffer[i]), target='forget')
-                        gate_statistics[i]['forget'] = len(s_buffer_forget[i])
-
-                    new_stat = self.stm.load_stat()
-                    if new_stat:
-                        track_stm_statistics.append(new_stat)
-
-                    gate_statistics[i]['pool'] = len(a_buffer[i])
                     gate_statistics[i]['score'] = float(env.score)
                     gate_statistics[i]['frames'] = float(env.k)
                     gate_statistics[i]['fetch'] /= float(env.k)
 
-                    print("ape | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g\t| learn_th: %g\t| forget_th: %g" %
+                    # update exp scale
+                    pool = gate_statistics[i]['learn'] / gate_statistics[i]['frames']
+                    fetched = gate_statistics[i]['fetch']
+                    lambda_learn = np.clip(lambda_learn * 0.98 ** np.sign(pool - self.stm_pool), a_max=5, a_min=0.1)
+                    lambda_fetch = np.clip(lambda_fetch * 0.992 ** np.sign(self.stm_fetch - fetched), a_max=1, a_min=0.8)
+
+                    print("ape | st: %d\t| sc: %d\t| f: %d\t| e: %7g\t| typ: %2d | trg: %d | t: %d\t| n %d\t| avg_r: %g\t| avg_f: %g\t| exp_l: %g\t| exp_f: %g\t|" %
                         (self.frame, env.score, env.k, mp_explore[i], np.sign(explore_threshold[i]), mp_trigger[i],
                          time.time() - self.start_time, self.n_offset, self.behavioral_avg_score,
-                         self.behavioral_avg_frame, learn_th, forget_th))
+                         self.behavioral_avg_frame, float(lambda_learn), float(lambda_fetch)))
 
                     stm_stat_string = "stm_stat | fetch: %g\t| learn: %g\t| forget: %g\t|" % \
                           (gate_statistics[i]['fetch'], gate_statistics[i]['learn'], gate_statistics[i]['forget'])
@@ -528,30 +516,12 @@ class ApeAgent(Agent):
 
                     print(stm_stat_string)
 
-                    # update scores and calc thresholds
-                    scores[i].append(env.score)
-                    scores[i] = scores[i][-4:]
-
-                    frames[i].append(env.k)
-                    frames[i] = frames[i][-4:]
-
-                    # update exp scale
-                    pool = np.sum([i['pool'] for i in gate_statistics]) / np.sum([i['frames'] for i in gate_statistics])
-                    exp_scale = exp_scale + 0.1 * (pool - 0.05)
-
-                    all_scores = np.concatenate(scores)
-                    learn_th = np.quantile(all_scores, 0.85)
-                    forget_th = np.quantile(all_scores, 0.5)
-
                     env.reset()
                     episode[i] = []
                     q_a[i] = []
-                    s_buffer[i] = []
-                    s_buffer_forget[i] = []
-                    a_buffer[i] = []
                     rewards[i] = [[]]
                     v_target[i] = [[]]
-                    gate_statistics[i] = {'fetch': 0, 'learn': 0, 'forget': 0, 'pool': 0, 'score': 0, 'frames': 0}
+                    gate_statistics[i] = {'fetch': 0, 'learn': 0, 'forget': 0, 'score': 0, 'frames': 0}
                     lives[i] = env.lives
 
                     # get new episode number
@@ -594,11 +564,19 @@ class ApeAgent(Agent):
                 stm_stats = pd.DataFrame(track_stm_statistics)
                 stm_stats = dict(stm_stats.mean())
                 stm_stats['rounds'] = len(track_stm_statistics)
-                stm_stats['exp'] = exp_scale
+                stm_stats['lambda_learn'] = lambda_learn
+                stm_stats['lambda_fetch'] = lambda_fetch
+
+                df_gate_statistics = pd.concat([pd.DataFrame(track_gate_statistics[j]) for j in range(n_players)])
+
+                if np.sum(df_gate_statistics['fetch']) > 0:
+                    stm_stats['coef'] = np.corrcoef(df_gate_statistics['fetch'], df_gate_statistics['score'])[0, 1]
+                else:
+                    stm_stats['coef'] = 0
 
                 all_scores = []
-
                 all_player_stats = {}
+
                 for j in range(n_players):
                     player_stats = pd.DataFrame(track_gate_statistics[j])
 
@@ -609,7 +587,7 @@ class ApeAgent(Agent):
                     player_stats['epochs'] = len(track_gate_statistics[j])
                     all_player_stats['p_%.2g_%.2g' % (mp_explore[j], player_i[j])] = player_stats
 
-                yield stm_stats, all_player_stats
+                yield stm_stats, all_player_stats, df_gate_statistics
 
                 track_stm_statistics = []
                 track_gate_statistics = [[] for _ in range(n_players)]

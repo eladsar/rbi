@@ -170,28 +170,29 @@ class PredictNet(nn.Module):
         return d, mu, std, kl.sum(dim=1)
 
 
-class PolicyNet2(nn.Module):
+class PolicyConv2(nn.Module):
 
     def __init__(self, add=0):
-        super(PolicyNet2, self).__init__()
+        super(PolicyConv2, self).__init__()
 
         self.latent_dim = args.latent
         self.labels_num = action_space + add
 
         # batch normalization and dropout
         self.cnn = nn.Sequential(
-            nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
+            nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4, bias=set_bias),
+            activation(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, bias=set_bias),
+            activation(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, bias=set_bias),
+            activation(),
         )
 
-        # initialization
-        self.cnn[0].bias.data.zero_()
-        self.cnn[2].bias.data.zero_()
-        self.cnn[4].bias.data.zero_()
+        if set_bias:
+            # initialization
+            self.cnn[0].bias.data.zero_()
+            self.cnn[2].bias.data.zero_()
+            self.cnn[4].bias.data.zero_()
 
         self.encoder = nn.Sequential(
             nn.Linear(3136, 512, bias=set_bias),
@@ -248,61 +249,123 @@ class PolicyNet2(nn.Module):
             return y
         else:
             return NotImplementedError
-# class PolicyNet2(nn.Module):
-#
-#     def __init__(self, add=0):
-#         super(PolicyNet2, self).__init__()
-#
-#         self.latent_dim = args.latent
-#         self.labels_num = action_space + add
-#
-#         self.encoder = nn.Sequential(
-#             nn.Linear(3136, 512, bias=set_bias),
-#             activation(),
-#             nn.Linear(512, 512, bias=set_bias),
-#             activation(),
-#         )
-#
-#         self.mu = nn.Linear(512, self.latent_dim, bias=set_bias)
-#         self.rho = nn.Linear(512, self.latent_dim, bias=set_bias)
-#
-#         self.var_layer = VarLayer()
-#
-#         self.decoder = nn.Sequential(
-#             nn.Linear(self.latent_dim, self.latent_dim, bias=set_bias),
-#             activation(),
-#             nn.Linear(self.latent_dim, self.labels_num, bias=set_bias),
-#         )
-#
-#         self.std_prior = 1
-#         self.mu_prior = 0
-#
-#     def forward(self, x, part='all'):
-#
-#         if part in ['all', 'enc']:
-#             x = x.view(-1, 3136)
-#             x = self.encoder(x)
-#             mu = self.mu(x)
-#             rho = self.rho(x)
-#
-#             std = torch.log1p(torch.exp(rho))
-#
-#             x = self.var_layer(mu, std)
-#
-#             # calculate the kl loss
-#             kl = (torch.log(self.std_prior / std) +
-#                   (std ** 2 + (mu - self.mu_prior) ** 2) / (2 * self.std_prior ** 2) - 0.5).sum(dim=1)
-#
-#         if part in ['all', 'dec']:
-#             y = self.decoder(x)
-#
-#             # calculate the kl loss
-#
-#         if part == 'all':
-#             return y, mu, std, kl
-#         elif part == 'enc':
-#             return x, mu, std, kl
-#         elif part == 'dec':
-#             return y
-#         else:
-#             return NotImplementedError
+
+
+class PolicyDet2(nn.Module):
+
+    def __init__(self, add=0):
+        super(PolicyDet2, self).__init__()
+
+        self.latent_dim = args.latent
+        self.labels_num = action_space + add
+
+        # batch normalization and dropout
+        self.cnn = nn.Sequential(
+            nn.Conv2d(args.history_length, 32, kernel_size=8, stride=4, bias=set_bias),
+            activation(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, bias=set_bias),
+            activation(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, bias=set_bias),
+            activation(),
+        )
+
+        if set_bias:
+            # initialization
+            self.cnn[0].bias.data.zero_()
+            self.cnn[2].bias.data.zero_()
+            self.cnn[4].bias.data.zero_()
+
+        self.fc = nn.Sequential(
+            nn.Linear(3136, 512, bias=set_bias),
+            activation(),
+            nn.Linear(512, self.labels_num, bias=set_bias),
+            activation(),
+        )
+
+        self.std_prior = 1
+        self.mu_prior = 0
+
+    def forward(self, x, part='all'):
+
+        if part in ['all', 'enc']:
+            # state CNN
+
+            x = self.cnn(x)
+            x = x.view(x.size(0), -1)
+
+            std = torch.cuda.FloatTensor(len(x), self.latent_dim).fill_(1)
+            mu = torch.cuda.FloatTensor(len(x), self.latent_dim).zero_()
+            kl = torch.cuda.FloatTensor(len(x)).zero_()
+
+        if part in ['all', 'dec']:
+            y = self.fc(x)
+
+            # calculate the kl loss
+
+        if part == 'all':
+            return y, mu, std, kl
+        elif part == 'enc':
+            return x, mu, std, kl
+        elif part == 'dec':
+            return y
+        else:
+            return NotImplementedError
+
+
+class PolicyNet2(nn.Module):
+
+    def __init__(self, add=0):
+        super(PolicyNet2, self).__init__()
+
+        self.latent_dim = args.latent
+        self.labels_num = action_space + add
+
+        self.encoder = nn.Sequential(
+            nn.Linear(3136, 512, bias=set_bias),
+            activation(),
+            nn.Linear(512, 512, bias=set_bias),
+            activation(),
+        )
+
+        self.mu = nn.Linear(512, self.latent_dim, bias=set_bias)
+        self.rho = nn.Linear(512, self.latent_dim, bias=set_bias)
+
+        self.var_layer = VarLayer()
+
+        self.decoder = nn.Sequential(
+            nn.Linear(self.latent_dim, self.latent_dim, bias=set_bias),
+            activation(),
+            nn.Linear(self.latent_dim, self.labels_num, bias=set_bias),
+        )
+
+        self.std_prior = 1
+        self.mu_prior = 0
+
+    def forward(self, x, part='all'):
+
+        if part in ['all', 'enc']:
+            x = self.encoder(x)
+            mu = self.mu(x)
+            rho = self.rho(x)
+
+            std = torch.log1p(torch.exp(rho))
+
+            x = self.var_layer(mu, std)
+
+            # calculate the kl loss
+            kl = (torch.log(self.std_prior / std) +
+                  (std ** 2 + (mu - self.mu_prior) ** 2) / (2 * self.std_prior ** 2) - 0.5).sum(dim=1)
+
+        if part in ['all', 'dec']:
+            y = self.decoder(x)
+
+            # calculate the kl loss
+
+        if part == 'all':
+            return y, mu, std, kl
+        elif part == 'enc':
+            return x, mu, std, kl
+        elif part == 'dec':
+            return y
+        else:
+            return NotImplementedError

@@ -21,7 +21,7 @@ args="--algorithm=ape --n-steps=3 --no-reward-shape --no-dropout --no-infinite-h
 --batch=128 --hidden-features=512 --clip=1 --discount=0.99 \
 --termination-reward=0 --friction-reward=0 --priority-alpha=0.6 --priority-beta=0.4 --epsilon-a=0.001 \
 --epsilon=0.00164 --cpu-workers=48 \
---update-target-interval=2500 --n-tot=781250 --checkpoint-interval=5000 \
+--update-target-interval=2500 --n-tot=800000 --checkpoint-interval=5000 \
 --random-initialization=2500 --player-replay-size=2500 --update-memory-interval=100 \
 --load-memory-interval=100 --replay-updates-interval=2500 --replay-memory-size=2000000 --n-actors=16"
 

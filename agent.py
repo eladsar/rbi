@@ -20,6 +20,9 @@ class Agent(object):
         self.termination_reward = args.termination_reward
         self.n_steps = args.n_steps
         self.n_stm = args.n_stm
+        self.stm_pool = args.stm_pool
+        self.stm_start = args.stm_start
+        self.stm_fetch = args.stm_fetch
         self.reward_shape = args.reward_shape
         self.player_replay_size = args.player_replay_size
         self.cmin = args.cmin

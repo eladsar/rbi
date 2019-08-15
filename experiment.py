@@ -4,6 +4,12 @@ import sys
 import numpy as np
 import pandas as pd
 
+import matplotlib as mpl
+mpl.use('Agg')  # No display
+import matplotlib.pyplot as plt
+import io
+import cv2
+
 from tensorboardX import SummaryWriter
 
 from tqdm import tqdm
@@ -250,7 +256,7 @@ class Experiment(object):
         agent = self.choose_agent()(self.replay_dir, player=True, data_dir=self.root)
         multiplayer = agent.multiplay()
 
-        for stm_stats, all_player_stats in multiplayer:
+        for stm_stats, all_player_stats, df in multiplayer:
 
             if args.tensorboard and args.eval_stm:
                 for c in stm_stats:
@@ -260,6 +266,20 @@ class Experiment(object):
 
                     for c in player_stats:
                         self.writer.add_scalar(f'{player_name}/{c}', float(player_stats[c]), agent.n_offset)
+
+                # add the score/fetch scatter plot
+                plt.figure()
+                plt.scatter(df['fetch'], df['score'], marker='x')
+                # plt.scatter(np.random.randn(100), np.random.randn(100), marker='x')
+                plt.grid()
+
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png')
+                plt.close()
+                buf.seek(0)
+                img = cv2.imdecode(np.frombuffer(buf.getvalue(), dtype=np.uint8), 0)
+
+                self.writer.add_image(f'fetch_stat', np.expand_dims(img, axis=0), agent.n_offset)
 
             player = self.get_player(agent)
             if player:
@@ -336,7 +356,7 @@ class Experiment(object):
 
         time.sleep(args.wait)
 
-        print("Here")
+        print("Evaluation player")
 
         while True:
 
